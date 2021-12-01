@@ -1,22 +1,39 @@
 use eframe::{egui, epi};
+use std::sync::{Arc, Mutex};
 
-pub struct FlowstormDebugger {
+#[derive(Debug)]
+pub struct DebuggerState {
     label: String,
-    value: f32,
+    pub value: f32,
+	
 }
 
-impl Default for FlowstormDebugger {
+impl Default for DebuggerState {
     fn default() -> Self {
-        Self {
-            label: "he".to_owned(),
-            value: 2.7,
-        }
-    }
+		Self {
+			label: "he".to_owned(),
+			value: 2.7,
+		}		
+	}
 }
 
-impl epi::App for FlowstormDebugger {
+pub struct DebuggerStateArc {
+	state_arc: Arc<Mutex<DebuggerState>>,
+	pub egui_ctx_ref: Option<egui::CtxRef> 
+}
+
+impl DebuggerStateArc {
+	pub fn new(a: Arc<Mutex<DebuggerState>>) -> Self {
+		Self {
+			state_arc: a,
+			egui_ctx_ref: None
+		}
+	}
+}
+
+impl epi::App for DebuggerStateArc {
     fn name(&self) -> &str {
-        "eframe template"
+        "Flowstorm debugger"
     }
 
     /// Called once before the first frame.
@@ -26,14 +43,16 @@ impl epi::App for FlowstormDebugger {
         _frame: &mut epi::Frame<'_>,
         _storage: Option<&dyn epi::Storage>,
     ) {
+		self.egui_ctx_ref = Some(egui::CtxRef::clone(_ctx));
     }
 
    
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::CtxRef, frame: &mut epi::Frame<'_>) {
-        let Self { label, value } = self;
-
+        let Self { state_arc, egui_ctx_ref: _ } = self;
+		let mut state = state_arc.lock().unwrap();
+		
         // Examples of how to create different panels and windows.
         // Pick whichever suits you.
         // Tip: a good default choice is to just keep the `CentralPanel`.
@@ -57,17 +76,13 @@ impl epi::App for FlowstormDebugger {
 
             ui.horizontal(|ui| {
                 ui.label("Write something: ");
-                ui.text_edit_singleline(label);
-				if label.len() > 5 {
-					label.split_off(5);
-				}
-                    
+                //ui.text_edit_singleline(label);
             });
 
-            ui.add(egui::Slider::new(value, 0.0..=10.0).text("value"));
+            ui.add(egui::Slider::new(&mut state.value, 0.0..=10.0).text("value"));
 
 			if ui.button("Increment").clicked() {
-                *value += 1.0;
+                state.value += 1.0;
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {

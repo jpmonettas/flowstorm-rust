@@ -1,5 +1,5 @@
 [package]
-name = "flowstorm_debugger"
+name = "flowstorm"
 version = "0.1.0"
 authors = ["Juan Monetta jpmonettas@gmail.com"]
 edition = "2018"
@@ -9,8 +9,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 eframe = "0.15.0" # Gives us egui, epi and web+native backends
-
-serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
 default = []
