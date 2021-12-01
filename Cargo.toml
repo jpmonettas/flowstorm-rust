@@ -8,10 +8,14 @@ edition = "2018"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-eframe = "0.15.0" # Gives us egui, epi and web+native backends
+egui = { version = "0.15.0", features = ["multi_threaded"] }
+epi = { version = "0.15.0" }
+egui_glium = { version = "0.15.0", default-features = false, features = ["clipboard", "epi", "links"], optional = true }
 
 [features]
-default = []
+default = ["default_fonts", "egui_glium"]
+default_fonts = ["egui/default_fonts"]
+multi = ["egui/multi_threaded"]
 
 [profile.release]
 opt-level = 2 # fast and small wasm
