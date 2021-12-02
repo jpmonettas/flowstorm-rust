@@ -14,7 +14,6 @@ impl Default for DebuggerState {
     }
 }
 
-#[derive(Debug)]
 pub struct DebuggerApp {
     state_arc: Arc<Mutex<DebuggerState>>,
     pub ctx_chan_sender: Option<oneshot::Sender<CtxRef>>,
