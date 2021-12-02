@@ -15,12 +15,12 @@ egui_glium = { version = "0.15.0", default-features = false, features = ["clipbo
 [features]
 default = ["default_fonts", "egui_glium"]
 default_fonts = ["egui/default_fonts"]
-multi = ["egui/multi_threaded"]
+multi_threaded = ["egui/multi_threaded"]
 
 [profile.release]
 opt-level = 2 # fast and small wasm
 
-[patch.crates-io]
+# [patch.crates-io]
 
 # If you want to use the bleeding edge version of `egui`:
 # eframe = { git = "https://github.com/emilk/egui", branch = "master" }
