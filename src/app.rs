@@ -1,5 +1,7 @@
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+// use std::sync::mpsc::Sender;
+use egui::CtxRef;
+use futures::channel::oneshot;
+use std::sync::{Arc, Mutex}; //<CtxRef>
 
 #[derive(Debug)]
 pub struct DebuggerState {
@@ -12,19 +14,20 @@ impl Default for DebuggerState {
     }
 }
 
+#[derive(Debug)]
 pub struct DebuggerApp {
     state_arc: Arc<Mutex<DebuggerState>>,
-    pub ctx_chan_sender: Sender<egui::CtxRef>,
+    pub ctx_chan_sender: Option<oneshot::Sender<CtxRef>>,
 }
 
 impl DebuggerApp {
     pub fn new(
         state_arc: Arc<Mutex<DebuggerState>>,
-        ctx_chan_sender: Sender<egui::CtxRef>,
+        ctx_chan_sender: oneshot::Sender<CtxRef>,
     ) -> Self {
         Self {
             state_arc,
-            ctx_chan_sender,
+            ctx_chan_sender: Some(ctx_chan_sender),
         }
     }
 }
@@ -37,13 +40,22 @@ impl epi::App for DebuggerApp {
     /// Called once before the first frame.
     fn setup(
         &mut self,
-        _ctx: &egui::CtxRef,
+        _ctx: &CtxRef,
         _frame: &mut epi::Frame<'_>,
         _storage: Option<&dyn epi::Storage>,
     ) {
-        self.ctx_chan_sender
-            .send(_ctx.clone())
-            .expect("Could not send to context channel during setup");
+        if let Some(sender) = self.ctx_chan_sender.take() {
+            match sender.send(_ctx.clone()) {
+                Ok(_) => println!("Context sent from setup"),
+                Err(_) => panic!("Could not send context from setup"),
+            };
+        }
+
+        // let _a = self
+        //     .ctx_chan_sender
+        //     .send(_ctx.to_owned())
+        // .unwrap ()
+        // .expect("Could not send to context channel during setup")
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.

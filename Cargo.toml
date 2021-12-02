@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 egui = { version = "0.15.0", features = ["multi_threaded"] }
 epi = { version = "0.15.0" }
 egui_glium = { version = "0.15.0", default-features = false, features = ["clipboard", "epi", "links"], optional = true }
+futures = { version = "0.3", features = ["compat"] }
 
 [features]
 default = ["default_fonts", "egui_glium"]

@@ -1,24 +1,33 @@
-#![forbid(unsafe_code)]
+// #![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), deny(warnings))] // Forbid warnings in release builds
 #![warn(rust_2018_idioms)]
 
+mod app;
+
+use app::DebuggerApp;
+use egui::CtxRef;
 use epi::NativeOptions;
+use futures::channel::oneshot;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-mod app;
 
 fn main() {
     let debugger_state_arc = Arc::new(Mutex::new(app::DebuggerState::default()));
 
     let thread_state_ref = Arc::clone(&debugger_state_arc);
-    let (tx, rx) = mpsc::channel();
+    // let (tx, rx) = mpsc::channel();
 
-    let dsa = app::DebuggerApp::new(Arc::clone(&debugger_state_arc), tx);
+    let (sender, receiver) = oneshot::channel::<CtxRef>();
 
-    let _h = thread::spawn(move || {
-        let ctx = rx.recv().unwrap();
+    let dsa = DebuggerApp::new(Arc::clone(&debugger_state_arc), sender);
+
+    let _h = thread::spawn(|| async move {
+        let ctx = receiver.await.unwrap();
+
+        println!("CTX received from setup");
+
         loop {
             let mut state = thread_state_ref.lock().unwrap();
             println!("*******{:?}", state);
@@ -34,6 +43,8 @@ fn main() {
             thread::sleep(Duration::from_millis(1000));
         }
     });
+
+    println!("@@@ before main thread runs");
 
     // h.join().unwrap();
 
