@@ -5,9 +5,16 @@ authors = ["Juan Monetta jpmonettas@gmail.com"]
 edition = "2018"
 
 [dependencies]
+# UI (egui)
 egui = { version = "0.15.0", features = ["multi_threaded"] }
 epi = { version = "0.15.0" }
 egui_glium = { version = "0.15.0", default-features = false, features = ["clipboard", "epi", "links"], optional = true }
+
+# websockets
+tungstenite = { version = "0.16.0" }
+
+# json parsing
+json = "0.12.4"
 
 [features]
 default = ["default_fonts", "egui_glium"]
