@@ -61,7 +61,8 @@ impl DebuggerState {
 	// This is for debug only
 	pub fn first_flow (&self) -> Option<&Flow> {        
 		let flows_keys : Vec<&FlowId> = self.flows.keys().collect();
-		return if flows_keys.len() > 0 {
+        
+		return if !flows_keys.is_empty() {
 			let fid = flows_keys[0];
 			Some(&self.flows[fid])
 		} else {
@@ -82,7 +83,7 @@ impl DebuggerState {
 				forms: HashMap::new(),
 				exec_traces: Vec::new(),
 				curr_exec_trace: 0,
-				timestamp: timestamp
+				timestamp
 			};
             flow.forms.insert(form_id, form);
 			self.flows.insert(flow_id, flow);

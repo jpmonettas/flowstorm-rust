@@ -1,11 +1,6 @@
-use {egui, epi};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{Sender};
-use std::collections::HashMap;
+use std::sync::mpsc::Sender;
 use crate::state::DebuggerState;
-use crate::state::FlowId;
-use crate::state::FormId;
-use crate::state::Flow;
 
 pub struct DebuggerApp {
 	state_arc: Arc<Mutex<DebuggerState>>,
@@ -41,7 +36,7 @@ impl epi::App for DebuggerApp {
 	/// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
 	fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut epi::Frame<'_>) {
 		let Self { state_arc, ctx_chan_sender: _ } = self;
-		let mut state = state_arc.lock().unwrap();
+		let state = state_arc.lock().unwrap();
         let first_flow = state.first_flow();
 		egui::CentralPanel::default().show(ctx, |ui| {
 			match first_flow {
@@ -49,7 +44,7 @@ impl epi::App for DebuggerApp {
 											  state.flows.len(),
 											  f.forms.len(),
 				                              f.exec_traces.len())),                
-				None => ui.heading(format!("No flows yet")),
+				None => ui.heading("No flows yet"),
 			}
             
 			//ui.add(egui::Slider::new(&mut state.value, 0..=10).text("value"));

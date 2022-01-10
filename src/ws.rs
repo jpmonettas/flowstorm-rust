@@ -3,7 +3,6 @@ use std::thread;
 use std::net::TcpListener;
 use tungstenite::accept;
 use json::JsonValue;
-use crate::views;
 use crate::state::DebuggerState;
 use crate::state::ExecTrace;
 use crate::state::Form;
