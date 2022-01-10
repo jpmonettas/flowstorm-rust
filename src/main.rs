@@ -6,7 +6,7 @@ use epi::NativeOptions;
 mod views;
 mod ws;
 mod state;
-mod lisp_parser;
+mod lisp_reader;
 
 fn main() {
     let debugger_state_arc = Arc::new(Mutex::new(state::DebuggerState::default()));
