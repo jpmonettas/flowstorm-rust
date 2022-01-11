@@ -108,6 +108,27 @@ pub fn read_str(input: &str) -> Option<LispForm> {
 	read(&mut input_iter)
 }
 
+fn lisp_form_vec_to_str(v: Vec<LispForm>) -> String {
+	v.iter().map(|f| f.to_string()).collect::<Vec<String>>().join(" ")
+}
+
+impl ToString for LispForm {
+	fn to_string(&self) -> String {
+        match self {
+			LispForm::String(s) => format!("\"{}\"", s),
+			LispForm::Atomic(s) => format!("{}", s),
+			LispForm::List(v) => { format!("({})", lisp_form_vec_to_str(v.to_vec()))},
+			LispForm::Vector(v) => { format!("[{}]", lisp_form_vec_to_str(v.to_vec()))},
+			LispForm::Set(v) => { format!("#{{{}}}", lisp_form_vec_to_str(v.to_vec()))},
+			LispForm::Map{keys: keys, vals: vals} => {
+				let content = keys.iter().zip(vals).map(|(k, v)| format!("{} {}", k.to_string(), v.to_string())).collect::<Vec<String>>().join(" ");
+				format!("{{{}}}", content)
+			},
+			
+		}
+	}
+}
+
 ///////////
 // Tests //
 ///////////
@@ -191,7 +212,19 @@ fn read_str_code_2_test() {
 		}		
 	}
     assert_eq!(r.len(), 3);
-       
+}
+
+#[test]
+fn to_string_test() {
+    
+	let input = "(let [a #{1 2} b [1/3 2] c (\"1\" 2)] (concat a b c))";
+    
+	if let Some(form) = read_str(input) {
+		assert_eq!(form.to_string(), String::from(input));
+	} else {
+		assert!(false);
+	}
+    
 }
 
 // TODO: string with scaped quotes inside
