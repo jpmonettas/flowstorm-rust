@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)] #![cfg_attr(not(debug_assertions), deny(warnings))] // Forbid warnings in release builds #![warn(clippy::all, rust_2018_idioms)] extern crate json; mod views; mod ws;
+#![allow(unused_variables)] //TODO: remove this
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use epi::NativeOptions;
@@ -7,6 +8,7 @@ mod views;
 mod ws;
 mod state;
 mod lisp_reader;
+mod lisp_pprinter;
 
 fn main() {
     let debugger_state_arc = Arc::new(Mutex::new(state::DebuggerState::default()));

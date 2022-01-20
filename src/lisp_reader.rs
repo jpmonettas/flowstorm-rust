@@ -2,25 +2,38 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LispForm {
-	Atomic(String),
+pub enum PrintStyle {
+	PairsBlock,
+	Binding,
+	Defn,
+	Standard,
+	Linear,
+	Unstyled,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrintableLispForm {
+	Atomic(String, Vec<u16>),
 	String(String),
-	List(Vec<LispForm>),
-	Vector(Vec<LispForm>),
-	Set(Vec<LispForm>),
-	Map{ keys: Vec<LispForm>, vals: Vec<LispForm>}
+	List{ childs: Vec<PrintableLispForm>, style: PrintStyle, coord: Vec<u16> },
+	Vector{ childs: Vec<PrintableLispForm>, style: PrintStyle, coord: Vec<u16>},
+	Set{ childs: Vec<PrintableLispForm>, style: PrintStyle, coord: Vec<u16>},
+	Map{ keys: Vec<PrintableLispForm>, vals: Vec<PrintableLispForm>, style: PrintStyle, coord: Vec<u16>}
 }
 
 
-fn read_delimited_vec(input: &mut Peekable<Chars>, delim: char) -> Vec<LispForm> {
+fn read_delimited_vec(input: &mut Peekable<Chars>, delim: char, curr_coord: &Vec<u16>) -> Vec<PrintableLispForm> {
 	input.next(); // discard the open delim
-	let mut v : Vec<LispForm> = Vec::new();
-    
+	let mut v : Vec<PrintableLispForm> = Vec::new();
+    let mut form_idx=0;
 	while let Some(c) = input.peek() {
         if c == &delim {break;}
-		
-		if let Some(form) = read(input) {
-            v.push(form);            
+
+		let mut form_coord = curr_coord.clone();
+		form_coord.push(form_idx);
+		if let Some(form) = read(input, &form_coord) {
+            v.push(form);
+			form_idx += 1;
 		}
 
 		// TODO: this should be simpler and more general
@@ -34,9 +47,10 @@ fn read_delimited_vec(input: &mut Peekable<Chars>, delim: char) -> Vec<LispForm>
             if cc == &' ' {
 				input.next(); // discard whitespace
 			}
-		}
+		}		
 	}
 	input.next(); // discard closing delim
+    
 	return v
 }
 
@@ -70,10 +84,11 @@ fn read_string(input: &mut Peekable<Chars>) -> String {
     s
 }
 
-fn read_map(input: &mut Peekable<Chars>) -> (Vec<LispForm>, Vec<LispForm>) {
-    let forms: Vec<LispForm> = read_delimited_vec(input, '}');
-	let mut keys: Vec<LispForm> = Vec::new();
-	let mut vals: Vec<LispForm> = Vec::new();
+fn read_map(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> (Vec<PrintableLispForm>, Vec<PrintableLispForm>) {
+	// TODO: finish this
+    let forms: Vec<PrintableLispForm> = read_delimited_vec(input, '}', curr_coord);
+	let mut keys: Vec<PrintableLispForm> = Vec::new();
+	let mut vals: Vec<PrintableLispForm> = Vec::new();
 	let mut i = 0;
 
     while i<(forms.len()) {
@@ -88,39 +103,39 @@ fn read_map(input: &mut Peekable<Chars>) -> (Vec<LispForm>, Vec<LispForm>) {
 	(keys, vals)
 }
 
-fn read(input: &mut Peekable<Chars>) -> Option<LispForm> {
+fn read(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> Option<PrintableLispForm> {
     if let Some(c) = input.peek() {
         match c {
-			'"' => Some(LispForm::String(read_string(input))),
-			'(' => Some(LispForm::List(read_delimited_vec(input, ')'))),
-			'[' => Some(LispForm::Vector(read_delimited_vec(input, ']'))),
-			'#' => {input.next(); Some(LispForm::Set(read_delimited_vec(input, '}')))},
-			'{' => {let (keys, vals) = read_map(input); Some(LispForm::Map {keys: keys, vals: vals})},
-			_  =>  Some(LispForm::Atomic(read_atomic_token(input))),
+			'"' => Some(PrintableLispForm::String(read_string(input))),
+			'(' => Some(PrintableLispForm::List{childs: read_delimited_vec(input, ')', curr_coord), style: PrintStyle::Unstyled, coord: curr_coord.clone()}),
+			'[' => Some(PrintableLispForm::Vector{childs: read_delimited_vec(input, ']', curr_coord), style: PrintStyle::Unstyled, coord: curr_coord.clone()}),
+			'#' => {input.next(); Some(PrintableLispForm::Set{childs: read_delimited_vec(input, '}', curr_coord), style: PrintStyle::Unstyled, coord: curr_coord.clone()})},
+			'{' => {let (keys, vals) = read_map(input, curr_coord); Some(PrintableLispForm::Map {keys: keys, vals: vals, style: PrintStyle::Unstyled, coord: curr_coord.clone()})},
+			_  =>  Some(PrintableLispForm::Atomic(read_atomic_token(input), curr_coord.clone())),
 		}        
 	} else {
 		None
 	}
 }
 
-pub fn read_str(input: &str) -> Option<LispForm> {
+pub fn read_str(input: &str) -> Option<PrintableLispForm> {
 	let mut input_iter = input.chars().peekable();
-	read(&mut input_iter)
+	read(&mut input_iter, &Vec::new())
 }
 
-fn lisp_form_vec_to_str(v: Vec<LispForm>) -> String {
+fn lisp_form_vec_to_str(v: Vec<PrintableLispForm>) -> String {
 	v.iter().map(|f| f.to_string()).collect::<Vec<String>>().join(" ")
 }
 
-impl ToString for LispForm {
+impl ToString for PrintableLispForm {
 	fn to_string(&self) -> String {
         match self {
-			LispForm::String(s) => format!("\"{}\"", s),
-			LispForm::Atomic(s) => format!("{}", s),
-			LispForm::List(v) => { format!("({})", lisp_form_vec_to_str(v.to_vec()))},
-			LispForm::Vector(v) => { format!("[{}]", lisp_form_vec_to_str(v.to_vec()))},
-			LispForm::Set(v) => { format!("#{{{}}}", lisp_form_vec_to_str(v.to_vec()))},
-			LispForm::Map{keys: keys, vals: vals} => {
+			PrintableLispForm::String(s) => format!("\"{}\"", s),
+			PrintableLispForm::Atomic(s,_) => format!("{}", s),
+			PrintableLispForm::List{ childs, style: _, coord: _} =>   { format!("({})", lisp_form_vec_to_str(childs.to_vec()))},
+			PrintableLispForm::Vector{ childs, style: _, coord: _} => { format!("[{}]", lisp_form_vec_to_str(childs.to_vec()))},
+			PrintableLispForm::Set{ childs, style: _, coord: _} =>    { format!("#{{{}}}", lisp_form_vec_to_str(childs.to_vec()))},
+			PrintableLispForm::Map{keys: keys, vals: vals, style: _, coord: _} => {
 				let content = keys.iter().zip(vals).map(|(k, v)| format!("{} {}", k.to_string(), v.to_string())).collect::<Vec<String>>().join(" ");
 				format!("{{{}}}", content)
 			},
@@ -137,7 +152,7 @@ impl ToString for LispForm {
 fn read_string_test() {
 	let mut r_str = String::from("");
 	if let Some(form) = read_str("\"this is a string\"") {
-		if let LispForm::String(s) = form {
+		if let PrintableLispForm::String(s) = form {
 			r_str = s;
 		}		
 	}
@@ -148,7 +163,7 @@ fn read_string_test() {
 fn read_atomic_token_test() {
 	let mut r_str = String::from("");
 	if let Some(form) = read_str("some_token") {
-		if let LispForm::Atomic(s) = form {
+		if let PrintableLispForm::Atomic(s, coord) = form {
 			r_str = s;
 		}		
 	}
@@ -157,9 +172,9 @@ fn read_atomic_token_test() {
 
 #[test]
 fn read_delimited_vec_simple_test() {
-	let mut r : Vec<LispForm> = Vec::new();
+	let mut r : Vec<PrintableLispForm> = Vec::new();
 	if let Some(form) = read_str("[1 2 3 4]") {
-		if let LispForm::Vector(childs) = form {
+		if let PrintableLispForm::Vector{ childs, style: _, coord: _} = form {
             r = childs;
 		}		
 	}
@@ -168,9 +183,9 @@ fn read_delimited_vec_simple_test() {
 
 #[test]
 fn read_delimited_vec_nested_test() {
-	let mut r : Vec<LispForm> = Vec::new();
+	let mut r : Vec<PrintableLispForm> = Vec::new();
 	if let Some(form) = read_str("[#{1 something} 8 [2 3] (hello \"world\" 5)]") {
-		if let LispForm::Vector(childs) = form {
+		if let PrintableLispForm::Vector{ childs, style: _, coord: _} = form {
             r = childs;
 		}		
 	}
@@ -179,10 +194,10 @@ fn read_delimited_vec_nested_test() {
 
 #[test]
 fn read_str_map_test() {
-	let mut rkeys : Vec<LispForm> = Vec::new();
-	let mut rvals : Vec<LispForm> = Vec::new();
+	let mut rkeys : Vec<PrintableLispForm> = Vec::new();
+	let mut rvals : Vec<PrintableLispForm> = Vec::new();
 	if let Some(form) = read_str("{1 2 3 4}") {
-		if let LispForm::Map {keys, vals} = form {
+		if let PrintableLispForm::Map {keys, vals, style, coord: _} = form {
 			rkeys = keys;
 			rvals = vals;
 		}		
@@ -194,20 +209,20 @@ fn read_str_map_test() {
 
 #[test]
 fn read_str_code_1_test() {
-	let mut r : Vec<LispForm> = Vec::new();
+	let mut r : Vec<PrintableLispForm> = Vec::new();
 	if let Some(form) = read_str("(defn factorial [n] (if (zero? n) 1 (* n (factorial (dec n)))))") {
-		if let LispForm::List(childs) = form {
+        if let PrintableLispForm::List{ childs, style: _, coord: _} = form {
             r = childs;
 		}		
 	}
-    assert_eq!(r.len() , 4);
+    assert_eq!(r.len() , 4);    
 }
 
 #[test]
 fn read_str_code_2_test() {
-	let mut r : Vec<LispForm> = Vec::new();
+	let mut r : Vec<PrintableLispForm> = Vec::new();
 	if let Some(form) = read_str("(let [a [1 2 3] b {:n/a 1, :c 2}] a)") {
-		if let LispForm::List(childs) = form {
+		if let PrintableLispForm::List{ childs, style: _, coord: _} = form {
             r = childs;
 		}		
 	}
