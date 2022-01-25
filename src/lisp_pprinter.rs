@@ -294,7 +294,7 @@ fn lisp_form_print_tokens_aux (pform: &PrintableLispForm, left: usize) -> Vec<Pr
 	
 }
 
-pub fn lisp_form_print_tokens (pform: &PrintableLispForm) -> Vec<PrintToken> {
+fn lisp_form_print_tokens (pform: &PrintableLispForm) -> Vec<PrintToken> {
 	flatten_print_tokens(&lisp_form_print_tokens_aux(pform, 0))
 }
 
@@ -348,7 +348,7 @@ fn standard_style_next_unstyled (pform: &mut PrintableLispForm) -> bool {
 	}
 }
 
-fn style_lisp_form (pform: &mut PrintableLispForm, width: usize) -> Vec<PrintToken>{
+pub fn style_lisp_form (pform: &mut PrintableLispForm, width: usize) -> Vec<PrintToken>{
 	symb_style_lisp_form_deep(pform);
 	println!("After deep styling {:?}", pform);
     loop {
@@ -367,7 +367,7 @@ fn style_lisp_form (pform: &mut PrintableLispForm, width: usize) -> Vec<PrintTok
 }
 
 // For tests and debugging
-pub fn print_tokens_to_str (tokens: Vec<PrintToken>) -> String {
+pub fn print_tokens_to_str (tokens: &Vec<PrintToken>) -> String {
 	let mut r = String::new();
 	
 	for t in tokens {
@@ -425,12 +425,12 @@ fn style_lisp_form_test() {
     let form1_toks = style_lisp_form(&mut form1, 40);
 	println!("{:?}", form1_toks);
     
-	assert_eq!(print_tokens_to_str(form1_toks),
+	assert_eq!(print_tokens_to_str(&form1_toks),
 			   "(defn factorial [n] \n  (if (zero? n)\n      1\n      (* n (factorial (dec n)))))");
 
 	// let mut form2 = read_str("(defn styled-ast-tokens-seq [{:keys [ptype childs-vec]} left] (cond (or (= :linear ptype) (nil? ptype)) (join :space (mapv (fn [x] (styled-ast-tokens x left)) childs-vec)) (= :standard-style ptype) (let [flen (count (first (styled-ast-tokens (first childs-vec) left)))] (->> childs-vec (map-indexed (fn [i s] (case i 0 (styled-ast-tokens s left) 1 [space-sep (styled-ast-tokens s (+ left flen 1))] [(indented-nl (+ left flen 2)) (styled-ast-tokens s (+ left flen 2))]))) (into []))) (= :defn-style ptype) (let [[a b c & r] childs-vec a-toks (styled-ast-tokens a left) a-len (count (first a-toks)) b-toks (styled-ast-tokens b (+ left a-len 1)) b-len (count (first b-toks)) c-toks (styled-ast-tokens c (+ left a-len b-len 1))] [a-toks :space b-toks :space c-toks :space (mapv (fn [x] (into (indented-nl (+ left indent-width)) (styled-ast-tokens x (+ left indent-width)))) r)]) (= :pairs-block-style ptype) (->> (partition 2 childs-vec) (map (fn [[a b]] (let [a-toks (styled-ast-tokens (assoc a :ptype :linear) left) a-str (first a-toks)] [a-toks space-sep (styled-ast-tokens b (+ left (count a-str) 3))]))) (join-coll (indented-nl (+ left indent-width)))) (= :binding-style ptype) (let [[symb bvec & r] childs-vec symb-toks (styled-ast-tokens symb left) symb-str (first symb-toks) bvec-toks (styled-ast-tokens (assoc bvec :ptype :pairs-block-style) (+ left (count symb-str) 1))] [symb-toks :space bvec-toks :space (mapv (fn [x] (into (indented-nl (+ left indent-width)) (styled-ast-tokens x (+ left indent-width)))) r)])))").unwrap();       
     // let form2_toks = style_lisp_form(&mut form2, 80);
-	// let form2_out = print_tokens_to_str(form2_toks);
+	// let form2_out = print_tokens_to_str(&form2_toks);
 	// println!("{:?}", form2_out);
 	// println!("{}", form2_out);
 	

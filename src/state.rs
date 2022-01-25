@@ -1,17 +1,25 @@
 use std::collections::HashMap;
+use crate::lisp_pprinter::PrintToken;
+use crate::lisp_pprinter::style_lisp_form;
+use crate::lisp_reader::read_str;
+use crate::lisp_reader::PrintableLispForm;
 
 pub type FlowId = u32;
 pub type FormId = u32;
 
 #[derive(Debug)]
 pub struct Form {
-	form_str: String
+	form_str: String,
+	print_tokens: Vec<PrintToken>
 }
 
 impl Form {
 	pub fn new(form_str: String) -> Self {
+		let mut form = read_str(&form_str).unwrap();
+		let tokens = style_lisp_form(&mut form, 40);
 		Self {
-			form_str
+			form_str,
+			print_tokens: tokens
 		}
 	}
 }
@@ -58,18 +66,15 @@ impl Default for DebuggerState {
 }
 
 impl DebuggerState {
-	// This is for debug only
-	pub fn first_flow (&self) -> Option<&Flow> {        
-		let flows_keys : Vec<&FlowId> = self.flows.keys().collect();
-        
-		return if !flows_keys.is_empty() {
-			let fid = flows_keys[0];
-			Some(&self.flows[fid])
-		} else {
-			None
-		}
+	// for debugging
+	pub fn get_flow(&self, flow_id: FlowId) -> &Flow {
+		self.flows.get(&flow_id).unwrap()
 	}
-
+	// for debugging
+	pub fn get_form_print_tokens (&self, flow_id: FlowId, form_id: FormId) -> &Vec<PrintToken> {
+		&self.get_flow(flow_id).forms.get(&form_id).unwrap().print_tokens
+	}
+	
 	pub fn add_flow_form(&mut self, flow_id: FlowId, form_id: FormId, form: Form, timestamp: u64) {
 		println!("Adding a flow form {} {} {:?} {}", flow_id, form_id, form, timestamp);
 		if self.flows.contains_key(&flow_id) {
