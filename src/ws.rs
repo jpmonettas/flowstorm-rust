@@ -17,6 +17,11 @@ use crate::state::Form;
 // - :fn-name [OPT]
 // - :timestamp [REQ]
 
+fn u16_from_json_value (obj : JsonValue) -> u16 {
+	let res : f64 = if let JsonValue::Number(n) = obj { f64::from(n) } else { panic!("json value is not a number") };
+	return res as u16;
+}
+
 fn u32_from_json_value (obj : JsonValue) -> u32 {
 	let res : f64 = if let JsonValue::Number(n) = obj { f64::from(n) } else { panic!("json value is not a number") };
 	return res as u32;
@@ -63,10 +68,10 @@ fn process_form_add_trace (state_ref: &Arc<Mutex<DebuggerState>>, obj : &JsonVal
     
 	let flow_id = u32_from_json_value(obj["flow-id"].clone());
 	let form_id = u32_from_json_value(obj["form-id"].clone());
-	let coor : Vec<u32> = if let JsonValue::Array(v) = &obj["coor"] {
+	let coord : Vec<u16> = if let JsonValue::Array(v) = &obj["coor"] {
 		v.iter()
-			.map(| c : &JsonValue | -> u32 {
-				u32_from_json_value(c.clone())
+			.map(| c : &JsonValue | -> u16 {
+				u16_from_json_value(c.clone())
 			})
 			.collect()
 	} else {
@@ -78,7 +83,7 @@ fn process_form_add_trace (state_ref: &Arc<Mutex<DebuggerState>>, obj : &JsonVal
 
 	// TODO: handle the :err filed
 	
-	let trace = ExecTrace::new (form_id, result, coor, timestamp);
+	let trace = ExecTrace::new (form_id, result, coord, timestamp);
 	
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
 	state.add_exec_trace(flow_id, trace);
@@ -140,7 +145,7 @@ pub fn start_ws_server (debugger_state_arc : Arc<Mutex<DebuggerState>>) {
                                 match c.as_ref() {
 									"flow-storm/init-trace" => process_form_init_trace(&thread_state_ref, obj),
 									"flow-storm/add-trace" =>  process_form_add_trace (&thread_state_ref, obj),
-									_ => panic!("Unhandled command {}", c),
+									_ => println!("Unhandled command {}", c),
 								}
 							} else {
 								println!("Command {} is not a string ", command);

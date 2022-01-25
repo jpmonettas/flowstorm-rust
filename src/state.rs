@@ -20,16 +20,16 @@ impl Form {
 pub struct ExecTrace {
 	form_id: FormId,
 	result: String,
-	coor: Vec<u32>,
+	coord: Vec<u16>,
 	timestamp: u64  
 }
 
 impl ExecTrace {
-	pub fn new(form_id: FormId, result: String, coor: Vec<u32>, timestamp: u64) -> Self {
+	pub fn new(form_id: FormId, result: String, coord: Vec<u16>, timestamp: u64) -> Self {
 		Self {
 			form_id,
 			result,
-			coor,
+			coord,
 			timestamp
 		}
 	}
