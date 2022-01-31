@@ -4,6 +4,7 @@
 use epi::NativeOptions;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use egui_glow;
 
 mod lisp_pprinter;
 mod lisp_reader;
@@ -25,5 +26,5 @@ fn main() {
     let native_options = NativeOptions::default();
 
     let dsa = views::DebuggerApp::new(Arc::clone(&debugger_state_arc), tx);
-    egui_glium::run(Box::new(dsa), &native_options)
+    egui_glow::run(Box::new(dsa), &native_options)
 }
