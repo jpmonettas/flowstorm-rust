@@ -1,4 +1,7 @@
 use crate::lisp_pprinter::PrintToken;
+use crate::lisp_reader;
+use crate::lisp_pprinter;
+use crate::lisp_reader::PrintableLispForm;
 use crate::state::Form;
 use crate::state::{DebuggerState, Flow, FlowExecution};
 use egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui};
@@ -127,10 +130,76 @@ fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
     });
 }
 
+fn seq_collapsing_header(ui: &mut Ui, form: &PrintableLispForm) {
+    match form {
+        PrintableLispForm::List {
+            childs,
+            style: _,
+            coord: _,
+        }
+        | PrintableLispForm::Vector {
+            childs,
+            style: _,
+            coord: _,
+        }
+        | PrintableLispForm::Set {
+            childs,
+            style: _,
+            coord: _,
+        } => {
+			// since the form is unstyled is going to print linear
+            let linear_print = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
+			let ch = egui::CollapsingHeader::new(linear_print);
+            ch.show(ui, |ui| {
+                for c in childs {
+                    result_form_tree(ui, c);
+                }
+            });
+        }
+        _ => {
+            panic!("seq_collapsing_header called with a non seq form");
+        }
+    }
+}
+
+fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
+    match form {
+        PrintableLispForm::Atomic(s, _) => {
+            ui.label(s);
+        }
+        PrintableLispForm::String(s) => {
+            ui.label(s);
+        }
+        PrintableLispForm::Map {
+            keys,
+            vals,
+            style: _,
+            coord: _,
+        } => {
+            // TODO: we can't print a map linear since the printer doesn't support it
+            egui::CollapsingHeader::new("{...}").show(ui, |ui| {
+				for (k, v) in keys.iter().zip(vals) {
+					let linear_key_print = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(k));
+					ui.horizontal_wrapped(|ui| {
+						ui.label(linear_key_print);
+						result_form_tree(ui, v);    
+					});					
+				}
+                
+            });
+        },
+		_ => { seq_collapsing_header(ui, form) }
+    }
+}
+
 fn flow_result(ui: &mut Ui, flow: &Flow) {
     egui::CentralPanel::default().show_inside(ui, |ui| {
-        let result = &flow.execution.executing_tarce().result;
-        ui.label(result);
+        let result_str = &flow.execution.executing_tarce().result;
+        if let Some(result_pf) = lisp_reader::read_str(result_str) {
+            result_form_tree(ui, &result_pf);
+        } else { // If we can't parse the result, show a label with the string
+            ui.label(result_str);
+        }        
     });
 }
 

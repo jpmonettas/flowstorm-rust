@@ -128,6 +128,7 @@ fn read_map(
     (keys, vals)
 }
 
+// TODO: this should return a Result instead of a Option
 fn read(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> Option<PrintableLispForm> {
     if let Some(c) = input.peek() {
         match c {
