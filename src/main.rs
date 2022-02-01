@@ -17,7 +17,9 @@ mod dev_data;
 fn main() {
     let debugger_state_arc = Arc::new(Mutex::new(state::DebuggerState::default()));
 
+	// ONLY FOR TESTING
 	crate::dev_data::add_nested_let_flow(&debugger_state_arc); 
+	crate::dev_data::add_factorial(&debugger_state_arc); 
 	
     let (tx, _rx) = mpsc::channel();
 

@@ -1,26 +1,80 @@
 use std::sync::{Arc, Mutex};
-use crate::state::{DebuggerState, ExecTrace, BindTrace, Form};
+use crate::state::{DebuggerState, ExprTrace, BindTrace, Form, FnCallTrace};
  
 pub fn add_nested_let_flow(debugger_state_arc: &Arc<Mutex<DebuggerState>>) {
 	let mut state = debugger_state_arc
         .lock()
         .expect("Can't get the lock on state mutex");
 
-    state.add_flow_form(
-        9884,
-        427530587,
-        Form::new(
-            "(let [a {:person/name \"Juan\" :person/age 38 :numbers (range 1000) :more-things [1 2 3 [2 3] {:a #{1 2}} (quote (1 2 3 \"hello\"))]}] (:more-things a))".to_string(),
-        ),
-        1643391850071,
-    );
-
-    state.add_exec_trace(9884, ExecTrace::new(427530587, "(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 ...)".to_string(), vec![1, 1, 5], 1643391850071));
-	state.add_bind_trace(9884, BindTrace::new(427530587, "a".to_string(), "{:person/name \"Juan\", :person/age 38, :numbers (0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 ...), :more-things [1 2 3 [2 3] {:a #{1 2}} (1 2 3 \"hello\")]}".to_string(), vec![], 1643391850074));
-	state.add_exec_trace(9884, ExecTrace::new(427530587, "{:person/name \"Juan\", :person/age 38, :numbers (0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 ...), :more-things [1 2 3 [2 3] {:a #{1 2}} (1 2 3 \"hello\")]}".to_string(), vec![2, 1], 1643391850075 ));
-	state.add_exec_trace(9884, ExecTrace::new(427530587, "[1 2 3 [2 3] {:a #{1 2}} (1 2 3 \"hello\")]".to_string(), vec![2], 1643391850076 ));
-	state.add_exec_trace(9884, ExecTrace::new(427530587, "[1 2 3 [2 3] {:a #{1 2}} (1 2 3 \"hello\")]".to_string(), vec![], 1643391850076 ));
-	state.add_exec_trace(9884, ExecTrace::new(427530587, "[1 2 3 [2 3] {:a #{1 2}} (1 2 3 \"hello\")]".to_string(), vec![], 1643391850076 ));
-
-	state.select_flow(9884);		
+    
 } 
+
+pub fn add_factorial(debugger_state_arc: &Arc<Mutex<DebuggerState>>) {
+	let mut state = debugger_state_arc
+        .lock()
+        .expect("Can't get the lock on state mutex");
+    
+	state.add_flow_form(1709,71712880,Form::new("(defn factorial [n] (if (zero? n) 1 (* n (factorial (dec n)))))".to_string()), 1643740412526);
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[5]".to_string(),1643740412580));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"5".to_string(),vec![], 1643740412581));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"5".to_string(),vec![3, 1, 1], 1643740412582));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"false".to_string(),vec![3, 1], 1643740412582));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"5".to_string(),vec![3, 3, 1], 1643740412583));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"5".to_string(),vec![3, 3, 2, 1, 1], 1643740412583));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"4".to_string(),vec![3, 3, 2, 1], 1643740412584));
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[4]".to_string(),1643740412584));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"4".to_string(),vec![], 1643740412584));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"4".to_string(),vec![3, 1, 1], 1643740412584));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"false".to_string(),vec![3, 1], 1643740412585));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"4".to_string(),vec![3, 3, 1], 1643740412585));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"4".to_string(),vec![3, 3, 2, 1, 1], 1643740412585));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"3".to_string(),vec![3, 3, 2, 1], 1643740412585));
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[3]".to_string(),1643740412586));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"3".to_string(),vec![], 1643740412586));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"3".to_string(),vec![3, 1, 1], 1643740412586));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"false".to_string(),vec![3, 1], 1643740412586));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"3".to_string(),vec![3, 3, 1], 1643740412586));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"3".to_string(),vec![3, 3, 2, 1, 1], 1643740412587));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 3, 2, 1], 1643740412587));
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[2]".to_string(),1643740412587));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"2".to_string(),vec![], 1643740412587));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 1, 1], 1643740412588));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"false".to_string(),vec![3, 1], 1643740412588));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 3, 1], 1643740412588));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 3, 2, 1, 1], 1643740412588));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3, 2, 1], 1643740412588));
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[1]".to_string(),1643740412589));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"1".to_string(),vec![], 1643740412589));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 1, 1], 1643740412589));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"false".to_string(),vec![3, 1], 1643740412589));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3, 1], 1643740412589));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3, 2, 1, 1], 1643740412590));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"0".to_string(),vec![3, 3, 2, 1], 1643740412590));
+	state.add_fn_call_trace(1709, FnCallTrace::new(71712880,"factorial".to_string(),"[0]".to_string(),1643740412590));
+	state.add_bind_trace(1709, BindTrace::new(71712880, "n".to_string(),"0".to_string(),vec![], 1643740412590));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"0".to_string(),vec![3, 1, 1], 1643740412591));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"true".to_string(),vec![3, 1], 1643740412591));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3], 1643740412591));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![], 1643740412591));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3, 2], 1643740412592));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3], 1643740412592));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3], 1643740412592));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![], 1643740412592));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"1".to_string(),vec![3, 3, 2], 1643740412592));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 3], 1643740412593));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3], 1643740412593));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![], 1643740412593));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"2".to_string(),vec![3, 3, 2], 1643740412593));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"6".to_string(),vec![3, 3], 1643740412594));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"6".to_string(),vec![3], 1643740412594));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"6".to_string(),vec![], 1643740412594));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"6".to_string(),vec![3, 3, 2], 1643740412594));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"24".to_string(),vec![3, 3], 1643740412595));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"24".to_string(),vec![3], 1643740412595));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"24".to_string(),vec![], 1643740412595));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"24".to_string(),vec![3, 3, 2], 1643740412595));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"120".to_string(),vec![3, 3], 1643740412596));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"120".to_string(),vec![3], 1643740412596));
+	state.add_exec_trace(1709,ExprTrace::new(71712880,"120".to_string(),vec![], 1643740412596));
+	
+}

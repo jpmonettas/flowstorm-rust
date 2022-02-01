@@ -38,14 +38,14 @@ impl Form {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExecTrace {
+pub struct ExprTrace {
     pub form_id: FormId,
     pub result: String,
     pub coord: Vec<u16>,
     pub timestamp: u64,
 }
 
-impl ExecTrace {
+impl ExprTrace {
     pub fn new(form_id: FormId, result: String, coord: Vec<u16>, timestamp: u64) -> Self {
         Self {
             form_id,
@@ -54,6 +54,31 @@ impl ExecTrace {
             timestamp,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FnCallTrace {
+    pub form_id: FormId,
+    pub fn_name: String,
+    pub args_vec: String,
+    pub timestamp: u64,
+}
+
+impl FnCallTrace {
+    pub fn new(form_id: FormId, fn_name: String, args_vec: String, timestamp: u64) -> Self {
+        Self {
+            form_id,
+            fn_name,
+            args_vec,
+            timestamp,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExecTrace {
+	ExprTrace(ExprTrace),
+	FnCallTrace(FnCallTrace)
 }
 
 #[derive(Debug, Clone)]
@@ -97,47 +122,52 @@ impl FlowExecution {
         }
     }
 
-    pub fn add_trace(&mut self, trace: ExecTrace) {
-        self.traces.push(trace)
+	pub fn add_fn_call_trace(&mut self, trace: FnCallTrace) {
+		self.traces.push(ExecTrace::FnCallTrace(trace));
+	}
+    pub fn add_expr_trace(&mut self, trace: ExprTrace) {
+        self.traces.push(ExecTrace::ExprTrace(trace));
     }
 
-    pub fn step_next(&mut self) {
-        if self.curr_trace_idx < self.traces.len() - 1 {
-            self.curr_trace_idx += 1;
-        }
+    pub fn step_next(&mut self) {        
+        if self.curr_trace_idx < self.traces.len()-1 {
+			self.curr_trace_idx += 1;
+		}
     }
 
     pub fn step_back(&mut self) {
-        if self.curr_trace_idx > 0 {
-            self.curr_trace_idx -= 1;
-        }
+		if self.curr_trace_idx > 0 {
+			self.curr_trace_idx -= 1;
+		}
     }
 
     pub fn jump_to(&mut self, trace_idx: &usize) {
         self.curr_trace_idx = *trace_idx;
-    }
+    }	
 
     pub fn is_current_coord_executing(&self, coord: &[u16]) -> bool {
-        if let Some(t) = self.traces.get(self.curr_trace_idx) {
-            t.coord.iter().eq(coord)
-        } else {
-            false
-        }
+		if let ExecTrace::ExprTrace(et) = self.executing_trace() {
+			et.coord.iter().eq(coord)
+		} else {
+			false
+		}        
     }
 
-    pub fn traces_for_coord(&self, coord: &[u16]) -> Vec<(usize, ExecTrace)> {
-        let mut r: Vec<(usize, ExecTrace)> = Vec::new();
+    pub fn traces_for_coord(&self, coord: &[u16]) -> Vec<(usize, ExprTrace)> {
+        let mut r: Vec<(usize, ExprTrace)> = Vec::new();
 
         for (idx, t) in self.traces.iter().enumerate() {
-            if t.coord.eq(coord) {
-                r.push((idx, t.clone()))
-            }
+			if let ExecTrace::ExprTrace(et) = t {
+				if et.coord.eq(coord) {
+					r.push((idx, et.clone()))
+				}
+			}            
         }
         r
     }
 
-    pub fn executing_tarce(&self) -> &ExecTrace {
-        self.traces.get(self.curr_trace_idx).unwrap()
+    pub fn executing_trace(&self) -> &ExecTrace {
+		&self.traces[self.curr_trace_idx]
     }
 }
 
@@ -163,15 +193,18 @@ fn is_coord_in_scope(scope_coord: &Vec<u16>, current_coord: &Vec<u16>) -> bool {
 
 impl Flow {
     pub fn current_locals(&self) -> Vec<(&str, &str)> {
-        let curr_trace = self.execution.executing_tarce();
+        let curr_trace = self.execution.executing_trace();
         let mut bindings: HashMap<&str, &str> = HashMap::new();
         for bt in &self.bind_traces {
-            if bt.form_id == curr_trace.form_id
-                && bt.timestamp <= curr_trace.timestamp
-                && is_coord_in_scope(&bt.coord, &curr_trace.coord)
-            {
-                bindings.insert(bt.symbol.as_str(), bt.value.as_str());
-            }
+			if let ExecTrace::ExprTrace(et) = curr_trace {
+				if bt.form_id == et.form_id
+					&& bt.timestamp <= et.timestamp
+					&& is_coord_in_scope(&bt.coord, &et.coord)  
+				{
+					bindings.insert(bt.symbol.as_str(), bt.value.as_str());
+				}
+			}
+            
         }
         let mut bindings_vec: Vec<(&str, &str)> = bindings.into_iter().collect();
         bindings_vec.sort_by_key(|t| t.1);
@@ -202,6 +235,9 @@ impl DebuggerState {
             };
             flow.forms.insert(form_id, form);
             e.insert(flow);
+
+			// make this flow selected
+			self.selected_flow_id = Some(flow_id);
         } else {
             // Add form to the flow
             if let Some(flow) = self.flows.get_mut(&flow_id) {
@@ -210,19 +246,25 @@ impl DebuggerState {
         }
     }
 
-    pub fn add_exec_trace(&mut self, flow_id: FlowId, exec_trace: ExecTrace) {
-        println!("Adding exec trace {} {:?}", flow_id, exec_trace);
-        let form_id = exec_trace.form_id;
-        let coord = exec_trace.coord.clone();
+    pub fn add_exec_trace(&mut self, flow_id: FlowId, expr_trace: ExprTrace) {
+        println!("Adding exec trace {} {:?}", flow_id, expr_trace);
+        let form_id = expr_trace.form_id;
+        let coord = expr_trace.coord.clone();
 
         if let Some(flow) = self.flows.get_mut(&flow_id) {
-            flow.execution.add_trace(exec_trace);
+            flow.execution.add_expr_trace(expr_trace);
 
             if let Some(ref mut form) = flow.forms.get_mut(&form_id) {
                 form.add_hot_coord(coord);
             }
         };
     }
+
+	pub fn add_fn_call_trace(&mut self, flow_id: FlowId, fn_call_trace: FnCallTrace){
+		if let Some(flow) = self.flows.get_mut(&flow_id) {
+            flow.execution.add_fn_call_trace(fn_call_trace);           
+        }
+	}
 
     pub fn add_bind_trace(&mut self, flow_id: FlowId, bind_trace: BindTrace) {
         println!("Adding bind trace {} {:?}", flow_id, bind_trace);

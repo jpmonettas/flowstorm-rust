@@ -1,6 +1,6 @@
 use crate::state::DebuggerState;
 use crate::state::Form;
-use crate::state::{BindTrace, ExecTrace};
+use crate::state::{BindTrace, ExprTrace, FnCallTrace};
 use json::JsonValue;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -42,34 +42,20 @@ fn string_from_json_value(obj: JsonValue) -> String {
     };
 }
 
-// :flow-storm/init-trace
-// - :flow-id [REQ]
-// - :form-id [REQ]
-// - :form [REQ]
-// - :fixed-flow-id-starter? [OPT] Signals that this is the starting trace of a fixed flow-id trace.
-// - :args-vec [OPT]
-// - :fn-name [OPT]
-// - :timestamp [REQ]
-
 fn process_form_init_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = u32_from_json_value(obj["flow-id"].clone());
     let form_id = u32_from_json_value(obj["form-id"].clone());
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
     let form_str = string_from_json_value(obj["form"].clone());
-
+	
+	println!("state.add_flow_form({},{},Form::new(\"{}\".to_string()), {});", flow_id, form_id, &form_str, timestamp);
+	
     let form = Form::new(form_str);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
+    
     state.add_flow_form(flow_id, form_id, form, timestamp);
 }
-
-// :flow-storm/add-trace
-// - :flow-id [REQ]
-// - :form-id [REQ]
-// - :coor [REQ]
-// - :result [REQ]
-// - :err [OPT]  A map like {:error/message "..."} in case a exception ocurred evaluating this form. The :result is not present when this key is.
-// - :timestamp [REQ]
 
 fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = u32_from_json_value(obj["flow-id"].clone());
@@ -87,19 +73,27 @@ fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue
 
     // TODO: handle the :err filed
 
-    let trace = ExecTrace::new(form_id, result, coord, timestamp);
-
+	println!("state.add_exec_trace({},ExprTrace::new({},\"{}\".to_string(),vec!{:?}, {}));", flow_id, form_id, &result, &coord, timestamp);
+	
+    let trace = ExprTrace::new(form_id, result, coord, timestamp);
+    
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
     state.add_exec_trace(flow_id, trace);
 }
 
-// :flow-storm/add-bind-trace
-// - :flow-id [REQ]
-// - :form-id [REQ]
-// - :coor [REQ]
-// - :symbol [REQ]
-// - :value [REQ]
-// - :timestamp [REQ]
+fn process_fn_call_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
+    let flow_id = u32_from_json_value(obj["flow-id"].clone());
+    let form_id = u32_from_json_value(obj["form-id"].clone());
+
+    let fn_name = string_from_json_value(obj["fn-name"].clone());
+    let args_vec = string_from_json_value(obj["args-vec"].clone());
+    let timestamp = u64_from_json_value(obj["timestamp"].clone());
+
+	println!("state.add_fn_call_trace({}, FnCallTrace::new({},\"{}\".to_string(),\"{}\".to_string(),{}));", flow_id, form_id, &fn_name, &args_vec, timestamp);
+	let trace = FnCallTrace::new(form_id, fn_name, args_vec, timestamp);
+	let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
+	state.add_fn_call_trace(flow_id, trace);
+}
 
 fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = u32_from_json_value(obj["flow-id"].clone());
@@ -117,28 +111,13 @@ fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &Json
 
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
 
+	println!("state.add_bind_trace({}, BindTrace::new({}, \"{}\".to_string(),\"{}\".to_string(),vec!{:?}, {}));", flow_id, form_id, &symbol, &value, &coord, timestamp);
     let trace = BindTrace::new(form_id, symbol, value, coord, timestamp);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
     state.add_bind_trace(flow_id, trace);
 }
 
-// :flow-storm/ref-init-trace
-// - :ref-id [REQ]
-// - :ref-name [OPT]
-// - :init-val [REQ]
-// - :timestamp [REQ]
-
-// :flow-storm/ref-trace
-// - :ref-id [REQ]
-// - :patch [REQ]
-// - :timestamp [REQ]
-
-// :flow-storm/tap-trace
-// - :tap-id [REQ]
-// - :tap-name [OPT]
-// - :value [REQ]
-// - :timestamp [REQ]
 
 pub fn start_ws_server(debugger_state_arc: Arc<Mutex<DebuggerState>>) {
     thread::spawn(move || {
@@ -165,13 +144,16 @@ pub fn start_ws_server(debugger_state_arc: Arc<Mutex<DebuggerState>>) {
 
                             if let JsonValue::Short(c) = command {
                                 match c.as_ref() {
-                                    "flow-storm/init-trace" => {
+                                    "init-trace" => {
                                         process_form_init_trace(&thread_state_ref, obj)
                                     }
-                                    "flow-storm/add-trace" => {
+                                    "fn-call-trace" => {
+                                        process_fn_call_trace(&thread_state_ref, obj)
+                                    }
+									"exec-trace" => {
                                         process_form_add_trace(&thread_state_ref, obj)
                                     }
-                                    "flow-storm/add-bind-trace" => {
+                                    "bind-trace" => {
                                         process_form_add_bind_trace(&thread_state_ref, obj)
                                     }
                                     _ => println!("Unhandled command {}", c),

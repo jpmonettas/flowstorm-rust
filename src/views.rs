@@ -3,7 +3,7 @@ use crate::lisp_reader;
 use crate::lisp_pprinter;
 use crate::lisp_reader::PrintableLispForm;
 use crate::state::Form;
-use crate::state::{DebuggerState, Flow, FlowExecution};
+use crate::state::{DebuggerState, Flow, FlowExecution, ExecTrace, ExprTrace};
 use egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -44,23 +44,35 @@ fn hot_token_label(
 ) {
     let mut rich_text = RichText::new(text);
     if form.is_coord_hot(coord) {
-        rich_text = rich_text.heading().strong();
-
-        if execution.is_current_coord_executing(coord) {
-            rich_text = rich_text.color(Color32::RED);
+        rich_text = rich_text.color(Color32::YELLOW);
+		let curr_executing = execution.is_current_coord_executing(coord);
+        if curr_executing {
+            rich_text = rich_text.color(Color32::GREEN);
         }
 
         let coord_traces = &execution.traces_for_coord(coord);
 
         if coord_traces.len() > 1 {
-            ui.menu_button(rich_text, |ui| {
-                for (trace_idx, t) in coord_traces {
-                    if ui.button(&t.result).clicked() {
-                        execution.jump_to(trace_idx);
-                        ui.close_menu();
-                    }
+			if !curr_executing {
+				rich_text = rich_text.color(Color32::from_rgb(245, 126, 7));
+			}            
+            let label = Label::new(rich_text).sense(Sense::click());
+			let label_ctx_menu = |ui: &mut Ui| { 
+				for (trace_idx, t) in coord_traces {                    
+                    if ui.button(&t.result)                        
+						.clicked() {
+							execution.jump_to(trace_idx);
+							ui.close_menu();
+						}
                 }
-            });
+			};
+			
+			if ui.add(label)
+				.context_menu(label_ctx_menu) 
+				.clicked() {
+					let (idx, _) = coord_traces[0];
+					execution.jump_to(&idx);
+				}
         } else {
             if ui
                 .add(Label::new(rich_text).sense(Sense::click()))
@@ -78,6 +90,7 @@ fn hot_token_label(
 }
 
 fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
+    
     let initial_size = egui::vec2(
         ui.available_width(),
         ui.spacing().interact_size.y, // Assume there will be
@@ -95,10 +108,19 @@ fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
         let forms = &flow.forms;
 
         for form in forms.values() {
+
+			if let ExecTrace::FnCallTrace(fct) = &flow.execution.executing_trace() {
+				let fn_call_text = RichText::new(format!("({} {})", fct.fn_name, fct.args_vec)).color(Color32::GREEN);
+				ui.label(fn_call_text);
+				ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // make sure we take up some height
+                ui.end_row();
+                ui.set_row_height(row_height);
+			}
+			
             for t in form.print_tokens() {
                 match t {
                     PrintToken::String(s) => {
-                        ui.label(RichText::new(s));
+                        ui.label(RichText::new(format!("\"{}\"",s)));
                     }
                     PrintToken::BlockOpen { val, coord } => {
                         hot_token_label(ui, &mut flow.execution, form, coord, val);
@@ -135,21 +157,21 @@ fn seq_collapsing_header(ui: &mut Ui, form: &PrintableLispForm) {
         PrintableLispForm::List {
             childs,
             style: _,
-            coord: _,
+            coord,
         }
         | PrintableLispForm::Vector {
             childs,
             style: _,
-            coord: _,
+            coord,
         }
         | PrintableLispForm::Set {
             childs,
             style: _,
-            coord: _,
+            coord,
         } => {
 			// since the form is unstyled is going to print linear
             let linear_print = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
-			let ch = egui::CollapsingHeader::new(linear_print);
+			let ch = egui::CollapsingHeader::new(linear_print).id_source(coord);
             ch.show(ui, |ui| {
                 for c in childs {
                     result_form_tree(ui, c);
@@ -168,16 +190,16 @@ fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
             ui.label(s);
         }
         PrintableLispForm::String(s) => {
-            ui.label(s);
+            ui.label(format!("\"{}\"",s));
         }
         PrintableLispForm::Map {
             keys,
             vals,
             style: _,
-            coord: _,
+            coord,
         } => {
             // TODO: we can't print a map linear since the printer doesn't support it
-            egui::CollapsingHeader::new("{...}").show(ui, |ui| {
+            egui::CollapsingHeader::new("{...}").id_source(coord).show(ui, |ui| {
 				for (k, v) in keys.iter().zip(vals) {
 					let linear_key_print = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(k));
 					ui.horizontal_wrapped(|ui| {
@@ -193,26 +215,25 @@ fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
 }
 
 fn flow_result(ui: &mut Ui, flow: &Flow) {
-    egui::CentralPanel::default().show_inside(ui, |ui| {
-        let result_str = &flow.execution.executing_tarce().result;
-        if let Some(result_pf) = lisp_reader::read_str(result_str) {
-            result_form_tree(ui, &result_pf);
-        } else { // If we can't parse the result, show a label with the string
-            ui.label(result_str);
-        }        
-    });
+	if let ExecTrace::ExprTrace(et) = flow.execution.executing_trace() {
+		let result_str = &et.result;
+		if let Some(result_pf) = lisp_reader::read_str(result_str) { 
+			result_form_tree(ui, &result_pf);
+		} else { // If we can't parse the result, show a label with the string
+			ui.label(result_str);
+		}            
+	}	
 }
 
 fn flow_locals(ui: &mut Ui, flow: &mut Flow) {
-    egui::CentralPanel::default().show_inside(ui, |ui| {
-        egui::Grid::new("locals").show(ui, |ui| {
-            for (symb, val) in flow.current_locals() {
-                ui.label(symb);
-                ui.label(val);
-                ui.end_row();
-            }
-        });
-    });
+    egui::Grid::new("locals").show(ui, |ui| {
+		ui.set_min_height(ui.available_height()/3.0);
+        for (symb, val) in flow.current_locals() {
+            ui.label(symb);
+            ui.label(val);
+            ui.end_row();
+        }
+    });    
 }
 
 fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
@@ -235,54 +256,60 @@ fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
                 });
             });
 
-            // Flow controls
-            egui::CentralPanel::default().show_inside(ui, |ui| {
-                egui::TopBottomPanel::top("flows_controls_panel").show_inside(ui, |ui| {
-                    if let Some(ref mut selected_flow) = state.selected_flow_mut() {
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.button("Prev").clicked() {
-                                selected_flow.execution.step_back();
-                            }
+			if let Some(ref mut selected_flow) = state.selected_flow_mut() {
+				// Flow controls            
+				ui.group(|ui| {
+					{
+						ui.horizontal_wrapped(|ui| {
+							if ui.button("Prev").clicked() {
+								selected_flow.execution.step_back();
+							}
 
-                            ui.label(format!(
-                                "[{}/{}]",
-                                selected_flow.execution.curr_trace_idx,
-                                selected_flow.execution.traces.len()
-                            ));
-                            if ui.button("Next").clicked() {
-                                selected_flow.execution.step_next();
-                            }
-                        });
-                    }
-                });
+							ui.label(format!(
+								"[{}/{}]",
+								selected_flow.execution.curr_trace_idx,
+								selected_flow.execution.traces.len()
+							));
+							if ui.button("Next").clicked() {
+								selected_flow.execution.step_next();
+							}
+						});
+					}
+				});
 
-                //Flow code
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    if let Some(ref mut flow) = state.selected_flow_mut() {
-                        ui.columns(2, |columns| {
-                            egui::ScrollArea::vertical().id_source("left").show(
-                                &mut columns[0],
-                                |ui| {
-                                    flow_code_block(ui, flow);
-                                },
-                            );
-                            egui::ScrollArea::vertical().id_source("right").show(
-                                &mut columns[1],
-                                |ui| {
-                                    flow_result(ui, flow);
+				ui.group(|ui| {
+					let available_height_for_right = ui.available_height();
+					egui::SidePanel::right("results_and_locals_panel")
+						.resizable(true)
+						.default_width(ui.available_width()/2.0)
+						.max_width(ui.available_width() - (ui.available_width()/3.0))
+						.show_inside(ui, |ui| {
+							ui.vertical(|ui| {
+								egui::ScrollArea::both()
+									.max_height(ui.available_height()/2.0)                                    
+									.show(ui, |ui| {										
+										flow_result(ui, selected_flow);
+									});
+								
+								;
+                                
+								ui.group(|ui| {                                    
+									egui::ScrollArea::vertical().show(ui, |ui| {
+										ui.set_width(ui.available_width());
+										ui.set_height(ui.available_height());
+										flow_locals(ui, selected_flow);
+									});            
+								});
+								
+							});							                           
+						});
 
-                                    egui::TopBottomPanel::bottom("flows_locals_panel")
-                                        .resizable(true)
-                                        .min_height(100.0)
-                                        .show_inside(ui, |ui| {
-                                            flow_locals(ui, flow);
-                                        });
-                                },
-                            );
-                        });
-                    }
-                });
-            });
+					egui::CentralPanel::default().show_inside(ui, |ui| {
+						flow_code_block(ui, selected_flow);
+					});
+				});
+			}
+            
         } else {
             ui.heading("No flow selected");
         }
@@ -309,11 +336,29 @@ impl epi::App for DebuggerApp {
     /// Called once before the first frame.
     fn setup(
         &mut self,
-        _ctx: &egui::CtxRef,
+        ctx: &egui::CtxRef,
         _frame: &epi::Frame,
         _storage: Option<&dyn epi::Storage>,
     ) {
-        let _r = self.ctx_chan_sender.send(egui::CtxRef::clone(_ctx));
+        let _r = self.ctx_chan_sender.send(egui::CtxRef::clone(ctx));
+
+		let mut fonts = egui::FontDefinitions::default();
+
+		fonts.family_and_size.insert(
+			TextStyle::Body,
+			(egui::FontFamily::Proportional, 15.0)
+		);
+
+		fonts.family_and_size.insert(
+			TextStyle::Button,
+			(egui::FontFamily::Proportional, 15.0)
+		);
+
+		ctx.set_fonts(fonts);
+		// Enable for debugging widgets layout
+		// ctx.set_debug_on_hover(true);
+
+		
     }
 
     /// Called each time the UI needs repainting, which may be many times per second.
