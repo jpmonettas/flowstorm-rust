@@ -167,8 +167,8 @@ fn lisp_form_seq_print_tokens(pform: &PrintableLispForm, left: usize) -> Vec<Pri
             } else {
                 match style {
                     PrintStyle::Unstyled | PrintStyle::Linear => {
-						// HACKY: prints this level linear and assumes that all forms
-						// down the tree are going to be unstyled, so everything will print linear
+                        // HACKY: prints this level linear and assumes that all forms
+                        // down the tree are going to be unstyled, so everything will print linear
                         return join(
                             PrintToken::Space,
                             childs
@@ -177,7 +177,7 @@ fn lisp_form_seq_print_tokens(pform: &PrintableLispForm, left: usize) -> Vec<Pri
                                     PrintToken::PrintTokensVec(lisp_form_print_tokens_aux(lf, left))
                                 })
                                 .collect::<Vec<PrintToken>>(),
-                        )
+                        );
                     }
 
                     PrintStyle::Standard => {
