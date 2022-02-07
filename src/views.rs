@@ -3,23 +3,18 @@ use crate::lisp_pprinter::PrintToken;
 use crate::lisp_reader;
 use crate::lisp_reader::PrintableLispForm;
 use crate::state::Form;
-use crate::state::{DebuggerState, ExecTrace, ExprTrace, Flow, FlowExecution};
+use crate::state::{
+    Coord, DebuggerState, DebuggerTool, ExecTrace, ExprTrace, Flow, FlowExecution, FlowThread,
+    FlowTool,
+};
+use crate::util_types::SortedForms;
 use egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-#[derive(PartialEq)]
-enum DebuggerTool {
-    Flows,
-    Refs,
-    Taps,
-    Timeline,
-}
-
 pub struct DebuggerApp {
     state_arc: Arc<Mutex<DebuggerState>>,
     pub ctx_chan_sender: Sender<egui::CtxRef>,
-    selected_tool: DebuggerTool,
 }
 
 impl DebuggerApp {
@@ -30,27 +25,22 @@ impl DebuggerApp {
         Self {
             state_arc,
             ctx_chan_sender,
-            selected_tool: DebuggerTool::Flows,
         }
     }
 }
 
-fn hot_token_label(
-    ui: &mut Ui,
-    execution: &mut FlowExecution,
-    form: &Form,
-    coord: &[u16],
-    text: &str,
-) {
+fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Coord, text: &str) {
     let mut rich_text = RichText::new(text);
-    if form.is_coord_hot(coord) {
+    if thread.is_coord_hot(form.form_id, coord) {
         rich_text = rich_text.color(Color32::YELLOW);
-        let curr_executing = execution.is_current_coord_executing(coord);
+        let curr_executing = thread
+            .execution
+            .is_current_coord_executing(form.form_id, coord);
         if curr_executing {
             rich_text = rich_text.color(Color32::GREEN);
         }
 
-        let coord_traces = &execution.traces_for_coord(coord);
+        let coord_traces = &thread.execution.traces_for_coord(form.form_id, coord);
 
         if coord_traces.len() > 1 {
             if !curr_executing {
@@ -60,7 +50,7 @@ fn hot_token_label(
             let label_ctx_menu = |ui: &mut Ui| {
                 for (trace_idx, t) in coord_traces {
                     if ui.button(&t.result).clicked() {
-                        execution.jump_to(trace_idx);
+                        thread.execution.jump_to(trace_idx);
                         ui.close_menu();
                     }
                 }
@@ -68,7 +58,7 @@ fn hot_token_label(
 
             if ui.add(label).context_menu(label_ctx_menu).clicked() {
                 let (idx, _) = coord_traces[0];
-                execution.jump_to(&idx);
+                thread.execution.jump_to(&idx);
             }
         } else {
             if ui
@@ -77,7 +67,7 @@ fn hot_token_label(
             {
                 if let Some(e) = coord_traces.iter().next() {
                     let (trace_idx, _) = e;
-                    execution.jump_to(trace_idx);
+                    thread.execution.jump_to(trace_idx);
                 }
             };
         }
@@ -86,7 +76,59 @@ fn hot_token_label(
     }
 }
 
-fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
+fn flow_callstack_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
+    
+    let initial_size = egui::vec2(
+        ui.available_width(),
+        ui.spacing().interact_size.y, // Assume there will be
+    );
+
+    let layout = Layout::left_to_right()
+        .with_main_wrap(true)
+        .with_cross_align(Align::BOTTOM);
+
+    let indent_width = 20;
+    let mut indent_level = 0;
+
+    ui.allocate_ui_with_layout(initial_size, layout, |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let row_height = (*ui.fonts())[TextStyle::Body].row_height();
+        ui.set_row_height(row_height);
+        
+        for t in flow_thread.execution.call_stack_traces() {
+            match t {
+                ExecTrace::FnCallTrace(fct) => {
+                    ui.allocate_exact_size(
+                        egui::vec2((indent_level * indent_width) as f32, row_height),
+                        Sense::hover(),
+                    );
+                    
+                    let fn_call_text = 
+                        format!("({}/{} {}", &fct.fn_ns, &fct.fn_name, &fct.args_vec);
+                    let fn_call_label_text = &fn_call_text[0..usize::min(80, fn_call_text.len())];
+                    ui.label(RichText::new(fn_call_label_text).strong());
+                    indent_level += 1;
+                }
+                ExecTrace::ExprTrace(et) => {
+                    indent_level -= 1;
+                    ui.allocate_exact_size(
+                        egui::vec2((indent_level * indent_width) as f32, row_height),
+                        Sense::hover(),
+                    );
+                    let ret_text = &et.result[0..usize::min(80, et.result.len())];
+                    let ret_label_text = RichText::new(format!(" => {}", ret_text));
+                    ui.label(RichText::new(")").strong());
+                    ui.label(ret_label_text);
+                }
+            }
+            ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // new line
+            ui.end_row();
+            ui.set_row_height(row_height);
+        }
+    });
+}
+
+fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
     let initial_size = egui::vec2(
         ui.available_width(),
         ui.spacing().interact_size.y, // Assume there will be
@@ -101,31 +143,33 @@ fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
         let row_height = (*ui.fonts())[TextStyle::Body].row_height();
         ui.set_row_height(row_height);
 
-        let forms = &flow.forms;
-
         for form in forms.iter() {
-            if let ExecTrace::FnCallTrace(fct) = &flow.execution.executing_trace() {
-                let fn_call_text = RichText::new(format!("({} {})", fct.fn_name, fct.args_vec))
-                    .color(Color32::GREEN);
-                ui.label(fn_call_text);
-                ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // make sure we take up some height
-                ui.end_row();
-                ui.set_row_height(row_height);
+            if let ExecTrace::FnCallTrace(fct) = &flow_thread.execution.executing_trace() {
+                if fct.form_id == form.form_id {
+                    let fn_call_text = format!("({} {})", &fct.fn_name, &fct.args_vec);
+                    let fn_call_text =
+                        RichText::new(&fn_call_text[0..usize::min(80, fn_call_text.len())])
+                            .color(Color32::GREEN);
+                    ui.label(fn_call_text);
+                    ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // make sure we take up some height
+                    ui.end_row();
+                    ui.set_row_height(row_height);
+                }
             }
 
-            for t in form.print_tokens() {
+            for t in &form.print_tokens {
                 match t {
                     PrintToken::String(s) => {
                         ui.label(RichText::new(format!("\"{}\"", s)));
                     }
                     PrintToken::BlockOpen { val, coord } => {
-                        hot_token_label(ui, &mut flow.execution, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, &coord, &val);
                     }
                     PrintToken::BlockClose { val, coord } => {
-                        hot_token_label(ui, &mut flow.execution, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, &coord, &val);
                     }
                     PrintToken::Atomic { val, coord } => {
-                        hot_token_label(ui, &mut flow.execution, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, &coord, &val);
                     }
                     PrintToken::Space => {
                         ui.label(RichText::new(" "));
@@ -140,8 +184,8 @@ fn flow_code_block(ui: &mut Ui, flow: &mut Flow) {
                     }
                 }
             }
-            // Add a new line to separate forms
-            ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover());
+            // Add some lines to separate rows
+            ui.allocate_exact_size(egui::vec2(0.0, row_height * 3.0), Sense::hover());
             ui.end_row();
             ui.set_row_height(row_height);
         }
@@ -214,8 +258,8 @@ fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
     }
 }
 
-fn flow_result(ui: &mut Ui, flow: &Flow) {
-    if let ExecTrace::ExprTrace(et) = flow.execution.executing_trace() {
+fn flow_result(ui: &mut Ui, flow_thread: &FlowThread) {
+    if let ExecTrace::ExprTrace(et) = flow_thread.execution.executing_trace() {
         let result_str = &et.result;
         if let Some(result_pf) = lisp_reader::read_str(result_str) {
             result_form_tree(ui, &result_pf);
@@ -226,10 +270,10 @@ fn flow_result(ui: &mut Ui, flow: &Flow) {
     }
 }
 
-fn flow_locals(ui: &mut Ui, flow: &mut Flow) {
+fn flow_locals(ui: &mut Ui, flow_thread: &mut FlowThread) {
     egui::Grid::new("locals").show(ui, |ui| {
         ui.set_min_height(ui.available_height() / 3.0);
-        for (symb, val) in flow.current_locals() {
+        for (symb, val) in flow_thread.current_locals() {
             ui.label(symb);
             ui.label(val);
             ui.end_row();
@@ -237,80 +281,159 @@ fn flow_locals(ui: &mut Ui, flow: &mut Flow) {
     });
 }
 
-fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
-    egui::CentralPanel::default().show_inside(ui, |ui| {
-        if let Some(selected_flow_id) = state.selected_flow_id {
-            // Flow selector
-            egui::TopBottomPanel::top("flows_selection_panel").show_inside(ui, |ui| {
+fn flow_thread(
+    ui: &mut Ui,
+    ctx: &egui::CtxRef,
+    forms: Vec<&Form>,
+    selected_flow_thread: &mut FlowThread,
+) {
+    // Flow controls
+    ui.group(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Prev").clicked() {
+                selected_flow_thread.execution.step_back();
+            }
+
+            ui.label(format!(
+                "[{}/{}]",
+                selected_flow_thread.execution.curr_trace_idx,
+                selected_flow_thread.execution.traces.len()
+            ));
+            if ui.button("Next").clicked() {
+                selected_flow_thread.execution.step_next();
+            }
+        });
+    });
+
+    ui.group(|ui| {
+        let available_height_for_right = ui.available_height();
+        egui::SidePanel::right("results_and_locals_panel")
+            .resizable(true)
+            .default_width(ui.available_width() / 2.0)
+            .max_width(ui.available_width() - (ui.available_width() / 3.0))
+            .show_inside(ui, |ui| {
+                ui.vertical(|ui| {
+                    egui::ScrollArea::both()
+                        .max_height(ui.available_height() / 2.0)
+                        .show(ui, |ui| {
+                            flow_result(ui, selected_flow_thread);
+                        });
+
+                    ui.group(|ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.set_height(ui.available_height());
+                            flow_locals(ui, selected_flow_thread);
+                        });
+                    });
+                });
+            });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::TopBottomPanel::bottom("left_side_tabs_panel").show_inside(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    for flow in state.flows.values() {
-                        if ui
-                            .selectable_label(
-                                selected_flow_id == flow.flow_id,
-                                format!("{}", flow.flow_id),
-                            )
-                            .clicked()
-                        {
-                            state.selected_flow_id = Some(flow.flow_id);
-                        }
+                    if ui
+                        .selectable_label(
+                            selected_flow_thread.selected_flow_tool == FlowTool::Code,
+                            "Code",
+                        )
+                        .clicked()
+                    {
+                        selected_flow_thread.selected_flow_tool = FlowTool::Code;
+                    } else if ui
+                        .selectable_label(
+                            selected_flow_thread.selected_flow_tool == FlowTool::CallStack,
+                            "Call stack",
+                        )
+                        .clicked()
+                    {
+                        selected_flow_thread.selected_flow_tool = FlowTool::CallStack;
                     }
                 });
             });
 
-            if let Some(ref mut selected_flow) = state.selected_flow_mut() {
-                // Flow controls
-                ui.group(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("Prev").clicked() {
-                            selected_flow.execution.step_back();
-                        }
-
-                        ui.label(format!(
-                            "[{}/{}]",
-                            selected_flow.execution.curr_trace_idx,
-                            selected_flow.execution.traces.len()
-                        ));
-                        if ui.button("Next").clicked() {
-                            selected_flow.execution.step_next();
-                        }
+            match selected_flow_thread.selected_flow_tool {
+                FlowTool::Code => {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        flow_code_block(ui, forms, selected_flow_thread);
                     });
-                });
-
-                ui.group(|ui| {
-                    let available_height_for_right = ui.available_height();
-                    egui::SidePanel::right("results_and_locals_panel")
-                        .resizable(true)
-                        .default_width(ui.available_width() / 2.0)
-                        .max_width(ui.available_width() - (ui.available_width() / 3.0))
-                        .show_inside(ui, |ui| {
-                            ui.vertical(|ui| {
-                                egui::ScrollArea::both()
-                                    .max_height(ui.available_height() / 2.0)
-                                    .show(ui, |ui| {
-                                        flow_result(ui, selected_flow);
-                                    });
-
-                                ui.group(|ui| {
-                                    egui::ScrollArea::vertical().show(ui, |ui| {
-                                        ui.set_width(ui.available_width());
-                                        ui.set_height(ui.available_height());
-                                        flow_locals(ui, selected_flow);
-                                    });
-                                });
-                            });
-                        });
-
-                    egui::CentralPanel::default().show_inside(ui, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            flow_code_block(ui, selected_flow);
-                        });
+                }
+                FlowTool::CallStack => {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        flow_callstack_block(ui, forms, selected_flow_thread);
                     });
-                });
+                }
             }
-        } else {
-            ui.heading("No flow selected");
-        }
+        });
     });
+}
+
+fn flow_threads(ui: &mut Ui, ctx: &egui::CtxRef, selected_flow: &mut Flow) {
+    if let Some(selected_thread_id) = selected_flow.selected_thread_id {
+        
+        egui::TopBottomPanel::top("thread_selection_panel").show_inside(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for thread in selected_flow.threads.values() {
+                    if ui
+                        .selectable_label(
+                            selected_thread_id == thread.thread_id,
+                            format!("{}", thread.thread_id),
+                        )
+                        .clicked()
+                    {
+                        selected_flow.selected_thread_id = Some(thread.thread_id);
+                    }
+                }
+            });
+        });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+
+            // HACKY, this shouldn't be here, but you know, borrow checker 
+            let mut selected_thread_forms = Vec::new();
+			{
+				for form_id in selected_flow.threads.get(&selected_thread_id).unwrap().hot_coords.keys() {                    
+					selected_thread_forms.push(selected_flow.forms.get(form_id).unwrap()); 
+				}
+			}
+            
+            flow_thread(
+                ui,
+                ctx,
+                selected_thread_forms,
+                &mut selected_flow.threads.get_mut(&selected_thread_id).unwrap(), 
+            ); 
+        });
+    }
+}
+
+fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
+    
+    if state.flows.is_empty() {
+        ui.heading("No flows yet");
+    } else {
+        egui::TopBottomPanel::top("flows_selection_panel").show_inside(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for flow in state.flows.values() {
+                    if ui
+                        .selectable_label(
+                            state.selected_flow_id.unwrap() == flow.flow_id,
+                            format!("{}", flow.flow_id),
+                        )
+                        .clicked()
+                    {
+                        state.selected_flow_id = Some(flow.flow_id);
+                    }
+                }
+            });
+        });
+
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            if let Some(ref mut selected_flow) = state.selected_flow_mut() {
+                flow_threads(ui, ctx, selected_flow);
+            }
+        });
+    }
 }
 
 fn refs_tool(ui: &mut Ui, state: &mut DebuggerState) {
@@ -357,14 +480,15 @@ impl epi::App for DebuggerApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::CtxRef, frame: &epi::Frame) {
-        let Self {
-            state_arc,
-            ctx_chan_sender: _,
-            selected_tool,
-        } = self;
+        // let Self {
+        //     state_arc,
+        //     ctx_chan_sender: _,
+        //     selected_tool,
+        // 	selected_flow_tool: _,
+        // } = self;
 
         // This is not optimal since we are keeping the lock for the entire frame
-        let mut state = state_arc.lock().unwrap();
+        let mut state = self.state_arc.lock().unwrap();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::TopBottomPanel::top("tool_selection_panel").show_inside(ui, |ui| {
@@ -373,30 +497,30 @@ impl epi::App for DebuggerApp {
                     ui.separator();
 
                     if ui
-                        .selectable_label(*selected_tool == DebuggerTool::Flows, "Flows")
+                        .selectable_label(state.selected_tool == DebuggerTool::Flows, "Flows")
                         .clicked()
                     {
-                        *selected_tool = DebuggerTool::Flows;
+                        state.selected_tool = DebuggerTool::Flows;
                     } else if ui
-                        .selectable_label(*selected_tool == DebuggerTool::Refs, "Refs")
+                        .selectable_label(state.selected_tool == DebuggerTool::Refs, "Refs")
                         .clicked()
                     {
-                        *selected_tool = DebuggerTool::Refs;
+                        state.selected_tool = DebuggerTool::Refs;
                     } else if ui
-                        .selectable_label(*selected_tool == DebuggerTool::Taps, "Taps")
+                        .selectable_label(state.selected_tool == DebuggerTool::Taps, "Taps")
                         .clicked()
                     {
-                        *selected_tool = DebuggerTool::Taps;
+                        state.selected_tool = DebuggerTool::Taps;
                     } else if ui
-                        .selectable_label(*selected_tool == DebuggerTool::Timeline, "Timeline")
+                        .selectable_label(state.selected_tool == DebuggerTool::Timeline, "Timeline")
                         .clicked()
                     {
-                        *selected_tool = DebuggerTool::Timeline;
+                        state.selected_tool = DebuggerTool::Timeline;
                     }
                 });
             });
 
-            egui::CentralPanel::default().show_inside(ui, |ui| match *selected_tool {
+            egui::CentralPanel::default().show_inside(ui, |ui| match state.selected_tool {
                 DebuggerTool::Flows => flows_tool(ui, ctx, &mut state),
                 DebuggerTool::Refs => refs_tool(ui, &mut state),
                 DebuggerTool::Taps => taps_tool(ui, &mut state),

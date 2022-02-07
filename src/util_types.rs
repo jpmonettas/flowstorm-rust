@@ -23,30 +23,32 @@ impl SortedForms {
         }
     }
 
-    pub fn get(&self, form_id: FormId) -> Option<&Form> {
-        self.forms_map.get(&form_id)
+    pub fn get(&self, form_id: &FormId) -> Option<&Form> {
+        self.forms_map.get(form_id)
     }
 
-    pub fn get_mut(&mut self, form_id: FormId) -> Option<&mut Form> {
-        self.forms_map.get_mut(&form_id)
+    pub fn get_mut(&mut self, form_id: &FormId) -> Option<&mut Form> {
+        self.forms_map.get_mut(form_id)
     }
 
     pub fn insert(&mut self, form_id: FormId, form: Form) {
-        let timestamp = form.timestamp.clone();
-        self.forms_map.insert(form_id, form);
-        let idx_result = self
-            .order
-            .as_slice()
-            .binary_search_by(|(ts, _)| ts.cmp(&timestamp).reverse());
+		if !self.forms_map.contains_key(&form_id) {
+			let timestamp = form.timestamp.clone();
+			self.forms_map.insert(form_id, form);
+			let idx_result = self
+				.order
+				.as_slice()
+				.binary_search_by(|(ts, _)| ts.cmp(&timestamp).reverse());
 
-        match idx_result {
-            Ok(idx) => {
-                self.order.insert(idx, (timestamp, form_id));
-            }
-            Err(idx) => {
-                self.order.insert(idx, (timestamp, form_id));
-            }
-        }
+			match idx_result {
+				Ok(idx) => {
+					self.order.insert(idx, (timestamp, form_id));
+				}
+				Err(idx) => {
+					self.order.insert(idx, (timestamp, form_id));
+				}
+			}
+		}
     }
 
     pub fn iter(&self) -> SortedFormsIter {
@@ -55,6 +57,7 @@ impl SortedForms {
             pos: 0,
         }
     }
+    
 }
 
 impl<'a> Iterator for SortedFormsIter<'a> {
@@ -79,17 +82,17 @@ mod tests {
     fn basic_test() {
         let mut sfs = SortedForms::new();
 
-        sfs.insert(1, Form::new("Form1".to_string(), 50));
-        sfs.insert(2, Form::new("Form2".to_string(), 10));
-        sfs.insert(3, Form::new("Form3".to_string(), 70));
-        sfs.insert(4, Form::new("Form4".to_string(), 20));
-        sfs.insert(5, Form::new("Form5".to_string(), 11));
+        sfs.insert(1, Form::new(1, "Form1".to_string(), 50));
+        sfs.insert(2, Form::new(2, "Form2".to_string(), 10));
+        sfs.insert(3, Form::new(3, "Form3".to_string(), 70));
+        sfs.insert(4, Form::new(4, "Form4".to_string(), 20));
+        sfs.insert(5, Form::new(5, "Form5".to_string(), 11));
 
         assert_eq!(sfs.get(1).unwrap().timestamp, 50);
         assert_eq!(sfs.get(2).unwrap().timestamp, 10);
         assert_eq!(sfs.get(3).unwrap().timestamp, 70);
 
         let rv = sfs.iter().map(|f| f.timestamp).collect::<Vec<u64>>();
-        assert_eq!(rv, vec![10, 11, 20, 50, 70]);
+        assert_eq!(rv, vec![70, 50, 20, 11, 10]);
     }
 }

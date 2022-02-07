@@ -42,18 +42,32 @@ fn string_from_json_value(obj: JsonValue) -> String {
     };
 }
 
+fn bool_from_json_value(obj: JsonValue) -> bool {
+    return match &obj {
+        JsonValue::Boolean(b) => b.clone(),
+        _ => false,
+    };
+}
+
+fn print_state(s: String) {
+    if true {
+        println!("{}", s);
+    }
+}
+
 fn process_form_init_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = i64_from_json_value(obj["flow-id"].clone());
     let form_id = i64_from_json_value(obj["form-id"].clone());
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
     let form_str = string_from_json_value(obj["form"].clone());
+    let form_ns = string_from_json_value(obj["ns"].clone());
 
-    println!(
-        "state.add_flow_form({},{},Form::new(r#\"{}\"#.to_string(), {}), {});",
-        flow_id, form_id, &form_str, timestamp, timestamp
-    );
+    print_state(format!(
+        "state.add_flow_form({},{},Form::new({}, \"{}\".to_string(), r#\"{}\"#.to_string(), {}), {});",
+        flow_id, form_id, form_id, form_ns, &form_str, timestamp, timestamp
+    ));
 
-    let form = Form::new(form_str, timestamp);
+    let form = Form::new(form_id, form_ns, form_str, timestamp);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
 
@@ -70,35 +84,39 @@ fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue
     } else {
         panic!("coor json value is not an array");
     };
-
+    let thread_id = u16_from_json_value(obj["thread-id"].clone());
     let result = string_from_json_value(obj["result"].clone());
+    let is_outer_form = bool_from_json_value(obj["outer-form?"].clone());
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
 
     // TODO: handle the :err filed
 
-    println!(
-        "state.add_exec_trace({},ExprTrace::new({},r#\"{}\"#.to_string(),vec!{:?}, {}));",
-        flow_id, form_id, &result, &coord, timestamp
-    );
+    print_state(format!(
+        "state.add_exec_trace({},{},ExprTrace::new({},r#\"{}\"#.to_string(),vec!{:?}, {}, {}));",
+        flow_id, thread_id, form_id, &result, &coord, is_outer_form, timestamp
+    ));
 
-    let trace = ExprTrace::new(form_id, result, coord, timestamp);
+    let trace = ExprTrace::new(form_id, result, coord, is_outer_form, timestamp);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
-    state.add_exec_trace(flow_id, trace);
+    state.add_exec_trace(flow_id, thread_id, trace);
 }
 
 fn process_fn_call_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = i64_from_json_value(obj["flow-id"].clone());
     let form_id = i64_from_json_value(obj["form-id"].clone());
 
+    let fn_ns = string_from_json_value(obj["fn-ns"].clone());
     let fn_name = string_from_json_value(obj["fn-name"].clone());
     let args_vec = string_from_json_value(obj["args-vec"].clone());
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
+    let thread_id = u16_from_json_value(obj["thread-id"].clone());
 
-    println!("state.add_fn_call_trace({}, FnCallTrace::new({},r#\"{}\"#.to_string(),r#\"{}\"#.to_string(),{}));", flow_id, form_id, &fn_name, &args_vec, timestamp);
-    let trace = FnCallTrace::new(form_id, fn_name, args_vec, timestamp);
+    print_state(format!("state.add_fn_call_trace({},{}, FnCallTrace::new({},r#\"{}\"#.to_string(), \"{}\".to_string() ,r#\"{}\"#.to_string(),{}));", flow_id, thread_id, form_id, &fn_ns, &fn_name, &args_vec, timestamp));
+
+    let trace = FnCallTrace::new(form_id, fn_ns, fn_name, args_vec, timestamp);
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
-    state.add_fn_call_trace(flow_id, trace);
+    state.add_fn_call_trace(flow_id, thread_id, trace);
 }
 
 fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
@@ -112,16 +130,17 @@ fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &Json
         panic!("coor json value is not an array");
     };
 
+    let thread_id = u16_from_json_value(obj["thread-id"].clone());
     let symbol = string_from_json_value(obj["symbol"].clone());
     let value = string_from_json_value(obj["value"].clone());
 
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
 
-    println!("state.add_bind_trace({}, BindTrace::new({}, r#\"{}\"#.to_string(),r#\"{}\"#.to_string(),vec!{:?}, {}));", flow_id, form_id, &symbol, &value, &coord, timestamp);
+    print_state(format!("state.add_bind_trace({}, {}, BindTrace::new({}, r#\"{}\"#.to_string(),r#\"{}\"#.to_string(),vec!{:?}, {}));", flow_id, thread_id, form_id, &symbol, &value, &coord, timestamp));
     let trace = BindTrace::new(form_id, symbol, value, coord, timestamp);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
-    state.add_bind_trace(flow_id, trace);
+    state.add_bind_trace(flow_id, thread_id, trace);
 }
 
 pub fn start_ws_server(debugger_state_arc: Arc<Mutex<DebuggerState>>) {

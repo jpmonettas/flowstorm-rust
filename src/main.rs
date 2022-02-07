@@ -22,12 +22,14 @@ mod ws;
 mod dev_data;
 
 fn main() {
-    let debugger_state_arc = Arc::new(Mutex::new(state::DebuggerState::default()));
+    let debugger_state_arc = Arc::new(Mutex::new(state::DebuggerState::new()));
 
     // ONLY FOR TESTING
     // crate::dev_data::add_nested_let_flow(&debugger_state_arc);
-    // crate::dev_data::add_factorial(&debugger_state_arc);
-    crate::dev_data::add_cljs_compiler_1(&debugger_state_arc);
+    //crate::dev_data::add_factorial(&debugger_state_arc);
+    crate::dev_data::add_parallel(&debugger_state_arc);
+    //crate::dev_data::add_cljs_compiler_1(&debugger_state_arc);
+    //crate::dev_data::fn_call(&debugger_state_arc);
 
     let (tx, _rx) = mpsc::channel();
 
