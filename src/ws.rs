@@ -50,7 +50,7 @@ fn bool_from_json_value(obj: JsonValue) -> bool {
 }
 
 fn print_state(s: String) {
-    if true {
+    if false {
         println!("{}", s);
     }
 }
@@ -72,6 +72,7 @@ fn process_form_init_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValu
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
 
     state.add_flow_form(flow_id, form_id, form, timestamp);
+    state.total_trace_count += 1;
 }
 
 fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
@@ -100,6 +101,7 @@ fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
     state.add_exec_trace(flow_id, thread_id, trace);
+    state.total_trace_count += 1;
 }
 
 fn process_fn_call_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
@@ -117,6 +119,7 @@ fn process_fn_call_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue)
     let trace = FnCallTrace::new(form_id, fn_ns, fn_name, args_vec, timestamp);
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
     state.add_fn_call_trace(flow_id, thread_id, trace);
+    state.total_trace_count += 1;
 }
 
 fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
@@ -141,6 +144,7 @@ fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &Json
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
     state.add_bind_trace(flow_id, thread_id, trace);
+    state.total_trace_count += 1;
 }
 
 pub fn start_ws_server(debugger_state_arc: Arc<Mutex<DebuggerState>>) {
@@ -176,10 +180,10 @@ pub fn start_ws_server(debugger_state_arc: Arc<Mutex<DebuggerState>>) {
                                     "bind-trace" => {
                                         process_form_add_bind_trace(&thread_state_ref, obj)
                                     }
-                                    _ => println!("Unhandled command {}", c),
+                                    _ => println!("WARNING! Unhandled command {}", c),
                                 }
                             } else {
-                                println!("Command {} is not a string ", command);
+                                println!("WARNING! Command {} is not a string ", command);
                             }
                         }
                     } else {

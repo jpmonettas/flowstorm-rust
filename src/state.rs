@@ -19,7 +19,7 @@ pub struct Form {
     pub ns: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExprTrace {
     pub form_id: FormId,
     pub result: String,
@@ -28,16 +28,16 @@ pub struct ExprTrace {
     pub is_outer_form: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FnCallTrace {
     pub form_id: FormId,
     pub fn_name: String,
-	pub fn_ns: String,
+    pub fn_ns: String,
     pub args_vec: String,
     pub timestamp: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExecTrace {
     ExprTrace(ExprTrace),
     FnCallTrace(FnCallTrace),
@@ -68,11 +68,13 @@ pub enum FlowTool {
 pub struct FlowThread {
     pub thread_id: ThreadId,
     pub execution: FlowExecution,
+    pub call_stack_depth: usize,
     pub bind_traces: Vec<BindTrace>,
     pub hot_coords: HashMap<FormId, HashSet<Coord>>,
     pub selected_flow_tool: FlowTool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Flow {
     pub flow_id: FlowId,
@@ -95,6 +97,7 @@ pub struct DebuggerState {
     pub flows: HashMap<FlowId, Flow>,
     pub selected_flow_id: Option<FlowId>,
     pub selected_tool: DebuggerTool,
+    pub total_trace_count: usize,
 }
 
 impl Form {
@@ -129,11 +132,17 @@ impl ExprTrace {
 }
 
 impl FnCallTrace {
-    pub fn new(form_id: FormId, fn_ns:String, fn_name: String, args_vec: String, timestamp: u64) -> Self {
+    pub fn new(
+        form_id: FormId,
+        fn_ns: String,
+        fn_name: String,
+        args_vec: String,
+        timestamp: u64,
+    ) -> Self {
         Self {
             form_id,
             fn_name,
-			fn_ns,
+            fn_ns,
             args_vec,
             timestamp,
         }
@@ -158,7 +167,7 @@ impl BindTrace {
     }
 }
 
-fn is_coord_in_scope(scope_coord: &Vec<u16>, current_coord: &Vec<u16>) -> bool {
+fn is_coord_in_scope(scope_coord: &Coord, current_coord: &Coord) -> bool {
     if scope_coord.is_empty() {
         true
     } else if scope_coord.len() > current_coord.len() {
@@ -168,11 +177,65 @@ fn is_coord_in_scope(scope_coord: &Vec<u16>, current_coord: &Vec<u16>) -> bool {
     }
 }
 
+pub struct FlowExecutionCallStackIter<'a> {
+    curr_idx: usize,
+    end_trace_idx: usize,
+    max_depth: usize,
+    traces: &'a Vec<ExecTrace>,
+    stack: Vec<&'a FnCallTrace>,
+}
+
+impl<'a> Iterator for FlowExecutionCallStackIter<'a> {
+    type Item = &'a ExecTrace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.curr_idx <= self.end_trace_idx {
+            let t = &self.traces[self.curr_idx];
+            self.curr_idx += 1;
+            match t {
+                ExecTrace::FnCallTrace(fct) => {
+                    self.stack.push(fct);
+                    if self.stack.len() <= self.max_depth {
+                        return Some(t);
+                    }
+                }
+                ExecTrace::ExprTrace(expr_trace) => {
+                    if expr_trace.is_outer_form {
+                        if self.stack.len() <= self.max_depth {
+                            self.stack.pop();
+                            return Some(t);
+                        } else {
+                            self.stack.pop();
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
 impl FlowExecution {
     pub fn new() -> Self {
         Self {
             traces: Vec::new(),
             curr_trace_idx: 0,
+        }
+    }
+
+    pub fn call_stack_iter(
+        &self,
+        start_idx: usize,
+        end_idx: usize,
+        max_depth: usize,
+    ) -> FlowExecutionCallStackIter {
+        FlowExecutionCallStackIter {
+            curr_idx: start_idx,
+            end_trace_idx: end_idx,
+            max_depth,
+            traces: &self.traces,
+            stack: Vec::new(),
         }
     }
 
@@ -227,26 +290,6 @@ impl FlowExecution {
     pub fn executing_trace(&self) -> &ExecTrace {
         &self.traces[self.curr_trace_idx]
     }
-
-    pub fn call_stack_traces(&self) -> Vec<&ExecTrace> {
-		// SPEED: this is going to be slow since it is going to be called per frame
-        self
-			.traces
-			.iter()
-			.filter_map(|et| {
-				match et {
-					ExecTrace::ExprTrace(expt) => {
-						if expt.is_outer_form {
-							Some(et)
-						} else {
-							None
-						}
-					},
-					ExecTrace::FnCallTrace(fct) => Some(et),
-				}
-			})
-			.collect()
-    }
 }
 
 impl FlowThread {
@@ -254,6 +297,7 @@ impl FlowThread {
         Self {
             thread_id,
             execution: FlowExecution::new(),
+            call_stack_depth: 1,
             bind_traces: Vec::new(),
             hot_coords: HashMap::new(),
             selected_flow_tool: FlowTool::Code,
@@ -287,10 +331,10 @@ impl FlowThread {
     }
 
     pub fn is_coord_hot(&self, form_id: FormId, coord: &Coord) -> bool {
-		match self.hot_coords.get(&form_id) {
-			Some(hot_set) => hot_set.contains(coord),
-			None => false,
-		}			       
+        match self.hot_coords.get(&form_id) {
+            Some(hot_set) => hot_set.contains(coord),
+            None => false,
+        }
     }
 
     pub fn current_locals(&self) -> Vec<(&str, &str)> {
@@ -310,13 +354,12 @@ impl FlowThread {
         bindings_vec.sort_by_key(|t| t.1);
         bindings_vec
     }
-	
 }
 
 impl Flow {
-    pub fn thread_ids(&self) -> Vec<&ThreadId> {
-        self.threads.keys().collect::<Vec<&ThreadId>>()
-    }	
+    pub fn thread_ids(&self) -> Vec<ThreadId> {
+        self.threads.keys().cloned().collect::<Vec<ThreadId>>()
+    }
 }
 
 impl DebuggerState {
@@ -325,6 +368,7 @@ impl DebuggerState {
             flows: HashMap::new(),
             selected_flow_id: None,
             selected_tool: DebuggerTool::Flows,
+            total_trace_count: 0,
         }
     }
 
@@ -364,16 +408,14 @@ impl DebuggerState {
             .get_mut(&flow_id)
             .expect("flow should be previously registered for flow_id");
         if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-            
             // first exec_trace of the FlowThread, create a FlowThread, then add the trace
             let mut thread = FlowThread::new(thread_id);
 
             thread.add_expr_trace(expr_trace);
             e.insert(thread);
-            
+
             flow.selected_thread_id = Some(thread_id);
         } else {
-            
             // FlowThread created, just add to it
             flow.threads
                 .get_mut(&thread_id)
@@ -399,8 +441,8 @@ impl DebuggerState {
 
             thread.add_fn_call_trace(fn_call_trace);
             e.insert(thread);
-			
-			flow.selected_thread_id = Some(thread_id);
+
+            flow.selected_thread_id = Some(thread_id);
         } else {
             // FlowThread created, just add to it
             flow.threads
@@ -424,7 +466,7 @@ impl DebuggerState {
             thread.add_bind_trace(bind_trace);
             e.insert(thread);
 
-			flow.selected_thread_id = Some(thread_id);
+            flow.selected_thread_id = Some(thread_id);
         } else {
             // FlowThread created, just add to it
             flow.threads
@@ -432,6 +474,10 @@ impl DebuggerState {
                 .unwrap()
                 .add_bind_trace(bind_trace);
         }
+    }
+
+    pub fn flows_ids(&self) -> Vec<FlowId> {
+        self.flows.keys().cloned().collect::<Vec<FlowId>>()
     }
 
     pub fn select_flow(&mut self, flow_id: FlowId) {
@@ -455,6 +501,7 @@ impl DebuggerState {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -466,4 +513,3 @@ mod tests {
         assert!(!is_coord_in_scope(&vec![1, 2, 3], &vec![1, 2]));
     }
 }
- 

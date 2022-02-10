@@ -3,11 +3,7 @@ use crate::lisp_pprinter::PrintToken;
 use crate::lisp_reader;
 use crate::lisp_reader::PrintableLispForm;
 use crate::state::Form;
-use crate::state::{
-    Coord, DebuggerState, DebuggerTool, ExecTrace, ExprTrace, Flow, FlowExecution, FlowThread,
-    FlowTool,
-};
-use crate::util_types::SortedForms;
+use crate::state::{Coord, DebuggerState, DebuggerTool, ExecTrace, Flow, FlowThread, FlowTool};
 use egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -76,8 +72,7 @@ fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Co
     }
 }
 
-fn flow_callstack_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
-    
+fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
     let initial_size = egui::vec2(
         ui.available_width(),
         ui.spacing().interact_size.y, // Assume there will be
@@ -94,19 +89,34 @@ fn flow_callstack_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowTh
         ui.spacing_mut().item_spacing.x = 0.0;
         let row_height = (*ui.fonts())[TextStyle::Body].row_height();
         ui.set_row_height(row_height);
-        
-        for t in flow_thread.execution.call_stack_traces() {
+
+        for t in flow_thread.execution.call_stack_iter(
+            0,
+            flow_thread.execution.traces.len() - 1,
+            flow_thread.call_stack_depth,
+        ) {
             match t {
                 ExecTrace::FnCallTrace(fct) => {
                     ui.allocate_exact_size(
                         egui::vec2((indent_level * indent_width) as f32, row_height),
                         Sense::hover(),
                     );
-                    
-                    let fn_call_text = 
-                        format!("({}/{} {}", &fct.fn_ns, &fct.fn_name, &fct.args_vec);
-                    let fn_call_label_text = &fn_call_text[0..usize::min(80, fn_call_text.len())];
-                    ui.label(RichText::new(fn_call_label_text).strong());
+
+                    ui.label(RichText::new("(").color(Color32::WHITE).strong());
+
+                    let fq_fn_name = format!("{}/{} ", &fct.fn_ns, &fct.fn_name);
+                    ui.label(
+                        RichText::new(fq_fn_name)
+                            .color(Color32::from_rgb(253, 58, 197))
+                            .strong(),
+                    );
+
+                    let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
+                    ui.label(
+                        RichText::new(&fn_args[0..usize::min(80, fn_args.len())])
+                            .color(Color32::WHITE),
+                    );
+
                     indent_level += 1;
                 }
                 ExecTrace::ExprTrace(et) => {
@@ -117,7 +127,7 @@ fn flow_callstack_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowTh
                     );
                     let ret_text = &et.result[0..usize::min(80, et.result.len())];
                     let ret_label_text = RichText::new(format!(" => {}", ret_text));
-                    ui.label(RichText::new(")").strong());
+                    ui.label(RichText::new(")").color(Color32::WHITE).strong());
                     ui.label(ret_label_text);
                 }
             }
@@ -163,13 +173,13 @@ fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
                         ui.label(RichText::new(format!("\"{}\"", s)));
                     }
                     PrintToken::BlockOpen { val, coord } => {
-                        hot_token_label(ui, flow_thread, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, coord, val);
                     }
                     PrintToken::BlockClose { val, coord } => {
-                        hot_token_label(ui, flow_thread, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, coord, val);
                     }
                     PrintToken::Atomic { val, coord } => {
-                        hot_token_label(ui, flow_thread, form, &coord, &val);
+                        hot_token_label(ui, flow_thread, form, coord, val);
                     }
                     PrintToken::Space => {
                         ui.label(RichText::new(" "));
@@ -189,6 +199,49 @@ fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
             ui.end_row();
             ui.set_row_height(row_height);
         }
+    });
+}
+
+fn flow_code_panel(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
+    egui::TopBottomPanel::top("flow_control_panel").show_inside(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Prev").clicked() {
+                flow_thread.execution.step_back();
+            }
+
+            ui.label(format!(
+                "[{}/{}]",
+                flow_thread.execution.curr_trace_idx,
+                flow_thread.execution.traces.len()
+            ));
+            if ui.button("Next").clicked() {
+                flow_thread.execution.step_next();
+            }
+        });
+    });
+    egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            flow_code_block(ui, forms, flow_thread);
+        });
+    });
+}
+
+fn flow_call_stack_panel(ui: &mut Ui, flow_thread: &mut FlowThread) {
+    egui::TopBottomPanel::top("flow_call_stack_panel").show_inside(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("-").clicked() && flow_thread.call_stack_depth > 1 {
+                flow_thread.call_stack_depth -= 1;
+            }
+            ui.label(format!("{}", flow_thread.call_stack_depth));
+            if ui.button("+").clicked() {
+                flow_thread.call_stack_depth += 1;
+            }
+        });
+    });
+    egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            flow_callstack_block(ui, flow_thread);
+        });
     });
 }
 
@@ -283,30 +336,11 @@ fn flow_locals(ui: &mut Ui, flow_thread: &mut FlowThread) {
 
 fn flow_thread(
     ui: &mut Ui,
-    ctx: &egui::CtxRef,
+    _ctx: &egui::CtxRef,
     forms: Vec<&Form>,
     selected_flow_thread: &mut FlowThread,
 ) {
-    // Flow controls
     ui.group(|ui| {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Prev").clicked() {
-                selected_flow_thread.execution.step_back();
-            }
-
-            ui.label(format!(
-                "[{}/{}]",
-                selected_flow_thread.execution.curr_trace_idx,
-                selected_flow_thread.execution.traces.len()
-            ));
-            if ui.button("Next").clicked() {
-                selected_flow_thread.execution.step_next();
-            }
-        });
-    });
-
-    ui.group(|ui| {
-        let available_height_for_right = ui.available_height();
         egui::SidePanel::right("results_and_locals_panel")
             .resizable(true)
             .default_width(ui.available_width() / 2.0)
@@ -354,14 +388,10 @@ fn flow_thread(
 
             match selected_flow_thread.selected_flow_tool {
                 FlowTool::Code => {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        flow_code_block(ui, forms, selected_flow_thread);
-                    });
+                    flow_code_panel(ui, forms, selected_flow_thread);
                 }
                 FlowTool::CallStack => {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        flow_callstack_block(ui, forms, selected_flow_thread);
-                    });
+                    flow_call_stack_panel(ui, selected_flow_thread);
                 }
             }
         });
@@ -370,59 +400,62 @@ fn flow_thread(
 
 fn flow_threads(ui: &mut Ui, ctx: &egui::CtxRef, selected_flow: &mut Flow) {
     if let Some(selected_thread_id) = selected_flow.selected_thread_id {
-        
         egui::TopBottomPanel::top("thread_selection_panel").show_inside(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for thread in selected_flow.threads.values() {
+                for thread_id in selected_flow.thread_ids() {
                     if ui
                         .selectable_label(
-                            selected_thread_id == thread.thread_id,
-                            format!("{}", thread.thread_id),
+                            selected_thread_id == thread_id,
+                            format!("thread-{}", thread_id),
                         )
                         .clicked()
                     {
-                        selected_flow.selected_thread_id = Some(thread.thread_id);
+                        selected_flow.selected_thread_id = Some(thread_id);
                     }
                 }
             });
         });
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-
-            // HACKY, this shouldn't be here, but you know, borrow checker 
+            // HACKY, this shouldn't be here, but you know, borrow checker
             let mut selected_thread_forms = Vec::new();
-			{
-				for form_id in selected_flow.threads.get(&selected_thread_id).unwrap().hot_coords.keys() {                    
-					selected_thread_forms.push(selected_flow.forms.get(form_id).unwrap()); 
-				}
-			}
-            
+            {
+                for form_id in selected_flow
+                    .threads
+                    .get(&selected_thread_id)
+                    .unwrap()
+                    .hot_coords
+                    .keys()
+                {
+                    selected_thread_forms.push(selected_flow.forms.get(form_id).unwrap());
+                }
+            }
+
             flow_thread(
                 ui,
                 ctx,
                 selected_thread_forms,
-                &mut selected_flow.threads.get_mut(&selected_thread_id).unwrap(), 
-            ); 
+                selected_flow.threads.get_mut(&selected_thread_id).unwrap(),
+            );
         });
     }
 }
 
 fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
-    
     if state.flows.is_empty() {
         ui.heading("No flows yet");
     } else {
         egui::TopBottomPanel::top("flows_selection_panel").show_inside(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                for flow in state.flows.values() {
+                for flow_id in state.flows_ids() {
                     if ui
                         .selectable_label(
-                            state.selected_flow_id.unwrap() == flow.flow_id,
-                            format!("{}", flow.flow_id),
+                            state.selected_flow().unwrap().flow_id == flow_id,
+                            format!("Flow-{}", flow_id),
                         )
                         .clicked()
                     {
-                        state.selected_flow_id = Some(flow.flow_id);
+                        state.select_flow(flow_id);
                     }
                 }
             });
@@ -436,15 +469,15 @@ fn flows_tool(ui: &mut Ui, ctx: &egui::CtxRef, state: &mut DebuggerState) {
     }
 }
 
-fn refs_tool(ui: &mut Ui, state: &mut DebuggerState) {
+fn refs_tool(ui: &mut Ui, _state: &mut DebuggerState) {
     ui.heading("REFS");
 }
 
-fn taps_tool(ui: &mut Ui, state: &mut DebuggerState) {
+fn taps_tool(ui: &mut Ui, _state: &mut DebuggerState) {
     ui.heading("TAPS");
 }
 
-fn timeline_tool(ui: &mut Ui, state: &mut DebuggerState) {
+fn timeline_tool(ui: &mut Ui, _state: &mut DebuggerState) {
     ui.heading("TIMELINE");
 }
 
@@ -531,10 +564,12 @@ impl epi::App for DebuggerApp {
                 ui.horizontal_wrapped(|ui| {
                     if let Some(cpu_usage) = frame.info().cpu_usage {
                         ui.label(format!(
-                            "Frame duration {:.2} ms ~ {:.0} fps",
+                            "Frame duration: {:.2}ms ~ {:.0}fps",
                             cpu_usage * 1000.0,
                             1.0 / cpu_usage
                         ));
+                        ui.separator();
+                        ui.label(format!("Trace count: {}", state.total_trace_count));
                     }
 
                     ui.separator();
