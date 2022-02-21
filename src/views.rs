@@ -277,11 +277,25 @@ fn seq_collapsing_header(ui: &mut Ui, form: &PrintableLispForm) {
             // since the form is unstyled is going to print linear
             let linear_print =
                 lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
-            let ch = egui::CollapsingHeader::new(linear_print).id_source(coord);
+            let ch = egui::CollapsingHeader::new(&linear_print[0..usize::min(80, linear_print.len())]).id_source(coord);
             ch.show(ui, |ui| {
                 for c in childs {
                     result_form_tree(ui, c);
                 }
+            });
+        },
+		PrintableLispForm::Tagged {
+            tag,
+            form,
+			coord,
+        } => {
+            // since the form is unstyled is going to print linear
+			let tagged_body = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
+            let linear_print = format!("#{}{}", tag, &tagged_body[0..usize::min(80, tagged_body.len())]);
+                
+            let ch = egui::CollapsingHeader::new(linear_print).id_source(coord);
+            ch.show(ui, |ui| {
+				result_form_tree(ui, form);                
             });
         }
         _ => {

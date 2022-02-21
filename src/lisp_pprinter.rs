@@ -425,6 +425,12 @@ fn lisp_form_print_tokens_aux(pform: &PrintableLispForm, left: usize) -> Vec<Pri
             val: s.to_string(),
             coord: coord.to_vec(),
         }],
+
+		PrintableLispForm::Tagged {tag, form, coord} => {
+			vec![PrintToken::Atomic{val: tag.to_string(),
+									coord: coord.to_vec()},
+				 PrintToken::PrintTokensVec(lisp_form_print_tokens_aux(form, left))]
+		}
     }
 }
 
@@ -484,6 +490,13 @@ fn symb_style_lisp_form_deep(pform: &mut PrintableLispForm) {
                 symb_style_lisp_form_deep(c)
             }
         }
+		PrintableLispForm::Tagged {
+			tag: _,
+			form,
+			coord: _
+		} => {
+			symb_style_lisp_form_deep(form)
+		}
         PrintableLispForm::String(_) => (),
         PrintableLispForm::Atomic(_, _) => (),
     }
@@ -526,6 +539,11 @@ fn standard_style_next_unstyled(pform: &mut PrintableLispForm) -> bool {
             style: _,
             coord: _,
         } => standard_style_next_unstyled_childs(keys) || standard_style_next_unstyled_childs(vals),
+		PrintableLispForm::Tagged {
+			tag: _,
+            ref mut form,
+			coord: _
+        } => standard_style_next_unstyled(&mut *form),
         PrintableLispForm::String(_) => false,
         PrintableLispForm::Atomic(_, _) => false,
     }

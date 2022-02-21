@@ -37,6 +37,11 @@ pub enum PrintableLispForm {
         style: PrintStyle,
         coord: Vec<u16>,
     },
+	Tagged {
+		tag: String,
+		form: Box<PrintableLispForm>,
+		coord: Vec<u16>,
+	}
 }
 
 fn read_delimited_vec(
@@ -84,7 +89,7 @@ fn read_atomic_token(input: &mut Peekable<Chars>) -> String {
         s.push(c.clone());
 
         if let Some(cc) = input.peek() {
-            if cc == &' ' || cc == &',' || cc == &')' || cc == &'}' || cc == &']' {
+            if cc == &' ' || cc == &',' || cc == &')' || cc == &'}' || cc == &']' || cc == &'(' || cc == &'{' || cc == &'[' {
                 break;
             }
         }
@@ -145,11 +150,25 @@ fn read(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> Option<PrintableL
             }),
             '#' => {
                 input.next();
-                Some(PrintableLispForm::Set {
-                    childs: read_delimited_vec(input, '}', curr_coord),
-                    style: PrintStyle::Unstyled,
-                    coord: curr_coord.clone(),
-                })
+				let next_ch = input.peek().unwrap();
+                if *next_ch == '{' {
+					// it is a set
+					Some(PrintableLispForm::Set {
+						childs: read_delimited_vec(input, '}', curr_coord),
+						style: PrintStyle::Unstyled,
+						coord: curr_coord.clone(),
+					})
+				} else {
+					// assume it is a tagged val
+					let tag = read_atomic_token(input);                    
+					let form = read(input, curr_coord).unwrap();
+                    Some(PrintableLispForm::Tagged {
+						tag: tag,
+						form: Box::new(form),
+						coord: curr_coord.clone()
+					})
+				}
+                
             }
             '{' => {
                 let (keys, vals) = read_map(input, curr_coord);
@@ -221,7 +240,15 @@ impl ToString for PrintableLispForm {
                     .collect::<Vec<String>>()
                     .join(" ");
                 format!("{{{}}}", content)
+            },
+			PrintableLispForm::Tagged {
+                tag,
+                form,
+				coord: _
+            } => {                
+                format!("#{}{}", tag, form.to_string())
             }
+			
         }
     }
 }
@@ -345,6 +372,17 @@ mod tests {
     #[test]
     fn to_string_test() {
         let input = "(let [a #{1 2} b [1/3 2] c (\"1\" 2)] (concat a b c))";
+
+        if let Some(form) = read_str(input) {
+            assert_eq!(form.to_string(), String::from(input));
+        } else {
+            assert!(false);
+        }
+    }
+
+	    #[test]
+    fn tagged_1_test() {
+        let input = "#atom[{1 2} 0x25176608]";
 
         if let Some(form) = read_str(input) {
             assert_eq!(form.to_string(), String::from(input));
