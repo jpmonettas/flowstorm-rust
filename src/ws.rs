@@ -7,6 +7,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tungstenite::accept;
 
+fn print_state_change_code(s: String) {
+    if false {
+        println!("{}", s);
+    }
+}
+
 fn u16_from_json_value(obj: JsonValue) -> u16 {
     let res: f64 = if let JsonValue::Number(n) = obj {
         f64::from(n)
@@ -49,12 +55,6 @@ fn bool_from_json_value(obj: JsonValue) -> bool {
     };
 }
 
-fn print_state(s: String) {
-    if false {
-        println!("{}", s);
-    }
-}
-
 fn process_form_init_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue) {
     let flow_id = i64_from_json_value(obj["flow-id"].clone());
     let form_id = i64_from_json_value(obj["form-id"].clone());
@@ -62,7 +62,7 @@ fn process_form_init_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValu
     let form_str = string_from_json_value(obj["form"].clone());
     let form_ns = string_from_json_value(obj["ns"].clone());
 
-    print_state(format!(
+    print_state_change_code(format!(
         "state.add_flow_form({},{},Form::new({}, \"{}\".to_string(), r#\"{}\"#.to_string(), {}), {});",
         flow_id, form_id, form_id, form_ns, &form_str, timestamp, timestamp
     ));
@@ -92,7 +92,7 @@ fn process_form_add_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue
 
     // TODO: handle the :err filed
 
-    print_state(format!(
+    print_state_change_code(format!(
         "state.add_exec_trace({},{},ExprTrace::new({},r#\"{}\"#.to_string(),vec!{:?}, {}, {}));",
         flow_id, thread_id, form_id, &result, &coord, is_outer_form, timestamp
     ));
@@ -114,7 +114,7 @@ fn process_fn_call_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &JsonValue)
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
     let thread_id = u16_from_json_value(obj["thread-id"].clone());
 
-    print_state(format!("state.add_fn_call_trace({},{}, FnCallTrace::new({},r#\"{}\"#.to_string(), \"{}\".to_string() ,r#\"{}\"#.to_string(),{}));", flow_id, thread_id, form_id, &fn_ns, &fn_name, &args_vec, timestamp));
+    print_state_change_code(format!("state.add_fn_call_trace({},{}, FnCallTrace::new({},r#\"{}\"#.to_string(), \"{}\".to_string() ,r#\"{}\"#.to_string(),{}));", flow_id, thread_id, form_id, &fn_ns, &fn_name, &args_vec, timestamp));
 
     let trace = FnCallTrace::new(form_id, fn_ns, fn_name, args_vec, timestamp);
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");
@@ -139,7 +139,7 @@ fn process_form_add_bind_trace(state_ref: &Arc<Mutex<DebuggerState>>, obj: &Json
 
     let timestamp = u64_from_json_value(obj["timestamp"].clone());
 
-    print_state(format!("state.add_bind_trace({}, {}, BindTrace::new({}, r#\"{}\"#.to_string(),r#\"{}\"#.to_string(),vec!{:?}, {}));", flow_id, thread_id, form_id, &symbol, &value, &coord, timestamp));
+    print_state_change_code(format!("state.add_bind_trace({}, {}, BindTrace::new({}, r#\"{}\"#.to_string(),r#\"{}\"#.to_string(),vec!{:?}, {}));", flow_id, thread_id, form_id, &symbol, &value, &coord, timestamp));
     let trace = BindTrace::new(form_id, symbol, value, coord, timestamp);
 
     let mut state = state_ref.lock().expect("Can't get the lock on state mutex");

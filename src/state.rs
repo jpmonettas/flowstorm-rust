@@ -1,6 +1,7 @@
 use crate::lisp_pprinter::style_lisp_form;
 use crate::lisp_pprinter::PrintToken;
-use crate::lisp_reader::read_str;
+use crate::lisp_reader;
+use crate::lisp_reader::{read_str, PrintableLispForm};
 use crate::util_types::SortedForms;
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -72,6 +73,7 @@ pub struct FlowThread {
     pub bind_traces: Vec<BindTrace>,
     pub hot_coords: HashMap<FormId, HashSet<Coord>>,
     pub selected_flow_tool: FlowTool,
+	pub value_inspector: Option<PrintableLispForm>
 }
 
 #[allow(dead_code)]
@@ -301,6 +303,7 @@ impl FlowThread {
             bind_traces: Vec::new(),
             hot_coords: HashMap::new(),
             selected_flow_tool: FlowTool::Code,
+			value_inspector: None
         }
     }
 
@@ -354,6 +357,34 @@ impl FlowThread {
         bindings_vec.sort_by_key(|t| t.1);
         bindings_vec
     }
+
+	pub fn update_value_inspector(&mut self, value: &str) {
+		if let Some(result_pf) = lisp_reader::read_str(value) {
+			self.value_inspector = Some(result_pf);			
+		} 
+	}
+
+	fn update_value_inspector_with_current_trace(&mut self) {
+		if let ExecTrace::ExprTrace(et) = self.execution.executing_trace().clone() {
+			self.update_value_inspector(&et.result);			
+		}
+	}
+	
+	pub fn step_next(&mut self) {
+        self.execution.step_next();
+		self.update_value_inspector_with_current_trace();
+    }
+
+    pub fn step_back(&mut self) {
+        self.execution.step_back();
+		self.update_value_inspector_with_current_trace();
+    }
+
+    pub fn jump_to(&mut self, trace_idx: &usize) {
+        self.execution.jump_to(trace_idx);
+		self.update_value_inspector_with_current_trace();
+    }
+
 }
 
 impl Flow {

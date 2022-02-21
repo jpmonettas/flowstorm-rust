@@ -46,7 +46,7 @@ fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Co
             let label_ctx_menu = |ui: &mut Ui| {
                 for (trace_idx, t) in coord_traces {
                     if ui.button(&t.result).clicked() {
-                        thread.execution.jump_to(trace_idx);
+                        thread.jump_to(trace_idx);
                         ui.close_menu();
                     }
                 }
@@ -54,7 +54,7 @@ fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Co
 
             if ui.add(label).context_menu(label_ctx_menu).clicked() {
                 let (idx, _) = coord_traces[0];
-                thread.execution.jump_to(&idx);
+                thread.jump_to(&idx);
             }
         } else {
             if ui
@@ -63,7 +63,7 @@ fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Co
             {
                 if let Some(e) = coord_traces.iter().next() {
                     let (trace_idx, _) = e;
-                    thread.execution.jump_to(trace_idx);
+                    thread.jump_to(trace_idx);
                 }
             };
         }
@@ -90,6 +90,7 @@ fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
         let row_height = (*ui.fonts())[TextStyle::Body].row_height();
         ui.set_row_height(row_height);
 
+		let mut value_inspector = &mut flow_thread.value_inspector;
         for t in flow_thread.execution.call_stack_iter(
             0,
             flow_thread.execution.traces.len() - 1,
@@ -112,10 +113,14 @@ fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
                     );
 
                     let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
-                    ui.label(
-                        RichText::new(&fn_args[0..usize::min(80, fn_args.len())])
-                            .color(Color32::WHITE),
-                    );
+                    let fn_args_text = RichText::new(&fn_args[0..usize::min(80, fn_args.len())]).color(Color32::WHITE);
+					if ui.add(Label::new(fn_args_text).sense(Sense::click())).clicked() {
+						
+						if let Some(result_pf) = lisp_reader::read_str(&fct.args_vec) {
+							*value_inspector = Some(result_pf);			
+						}                         
+					}
+                    
 
                     indent_level += 1;
                 }
@@ -124,11 +129,18 @@ fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
                     ui.allocate_exact_size(
                         egui::vec2((indent_level * indent_width) as f32, row_height),
                         Sense::hover(),
-                    );
+                    );					
                     let ret_text = &et.result[0..usize::min(80, et.result.len())];
                     let ret_label_text = RichText::new(format!(" => {}", ret_text));
                     ui.label(RichText::new(")").color(Color32::WHITE).strong());
-                    ui.label(ret_label_text);
+					
+					// handle click here
+					if ui.add(Label::new(ret_label_text).sense(Sense::click())).clicked() {
+						
+						if let Some(result_pf) = lisp_reader::read_str(&et.result) {
+							*value_inspector = Some(result_pf);			
+						}                         
+					}                                        
                 }
             }
             ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // new line
@@ -206,7 +218,7 @@ fn flow_code_panel(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
     egui::TopBottomPanel::top("flow_control_panel").show_inside(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             if ui.button("Prev").clicked() {
-                flow_thread.execution.step_back();
+                flow_thread.step_back();
             }
 
             ui.label(format!(
@@ -215,7 +227,7 @@ fn flow_code_panel(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
                 flow_thread.execution.traces.len()
             ));
             if ui.button("Next").clicked() {
-                flow_thread.execution.step_next();
+                flow_thread.step_next();
             }
         });
     });
@@ -312,15 +324,9 @@ fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
 }
 
 fn flow_result(ui: &mut Ui, flow_thread: &FlowThread) {
-    if let ExecTrace::ExprTrace(et) = flow_thread.execution.executing_trace() {
-        let result_str = &et.result;
-        if let Some(result_pf) = lisp_reader::read_str(result_str) {
-            result_form_tree(ui, &result_pf);
-        } else {
-            // If we can't parse the result, show a label with the string
-            ui.label(result_str);
-        }
-    }
+	if let Some(form) = &flow_thread.value_inspector {
+        result_form_tree(ui, form);
+	}     
 }
 
 fn flow_locals(ui: &mut Ui, flow_thread: &mut FlowThread) {
@@ -353,13 +359,15 @@ fn flow_thread(
                             flow_result(ui, selected_flow_thread);
                         });
 
-                    ui.group(|ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.set_height(ui.available_height());
-                            flow_locals(ui, selected_flow_thread);
-                        });
-                    });
+					if selected_flow_thread.selected_flow_tool == FlowTool::Code {
+						ui.group(|ui| {
+							egui::ScrollArea::vertical().show(ui, |ui| {
+								ui.set_width(ui.available_width());
+								ui.set_height(ui.available_height());
+								flow_locals(ui, selected_flow_thread);
+							});
+						});
+					}                    
                 });
             });
 
