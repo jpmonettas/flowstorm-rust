@@ -37,6 +37,7 @@ pub enum PrintableLispForm {
         style: PrintStyle,
         coord: Vec<u16>,
     },
+	Regexp(String),
 	Tagged {
 		tag: String,
 		form: Box<PrintableLispForm>,
@@ -158,6 +159,10 @@ fn read(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> Option<PrintableL
 						style: PrintStyle::Unstyled,
 						coord: curr_coord.clone(),
 					})
+				} else if *next_ch == '"' {
+					// its a regex
+					let exp = read_string(input);
+					Some(PrintableLispForm::Regexp(exp))
 				} else {
 					// assume it is a tagged val
 					let tag = read_atomic_token(input);                    
@@ -205,6 +210,7 @@ impl ToString for PrintableLispForm {
     fn to_string(&self) -> String {
         match self {
             PrintableLispForm::String(s) => format!("\"{}\"", s),
+            PrintableLispForm::Regexp(exp) => format!("#\"{}\"", exp),
             PrintableLispForm::Atomic(s, _) => format!("{}", s),
             PrintableLispForm::List {
                 childs,
@@ -380,11 +386,23 @@ mod tests {
         }
     }
 
-	    #[test]
+	#[test]
     fn tagged_1_test() {
         let input = "#atom[{1 2} 0x25176608]";
 
         if let Some(form) = read_str(input) {
+            assert_eq!(form.to_string(), String::from(input));
+        } else {
+            assert!(false);
+        }
+    }
+
+	#[test]
+    fn regex_test() {
+        let input = r#"(str/split something #".*")"#;
+
+        if let Some(form) = read_str(input) {
+			println!("{:?}",form);
             assert_eq!(form.to_string(), String::from(input));
         } else {
             assert!(false);

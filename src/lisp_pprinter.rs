@@ -10,6 +10,7 @@ use crate::lisp_reader::PrintableLispForm;
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrintToken {
     String(String),
+    Regexp(String),
     BlockOpen { val: String, coord: Vec<u16> },
     BlockClose { val: String, coord: Vec<u16> },
     Atomic { val: String, coord: Vec<u16> },
@@ -81,6 +82,9 @@ fn flatten_print_tokens(tokens: &Vec<PrintToken>) -> Vec<PrintToken> {
             PrintToken::String(_) => {
                 r.push(pt);
             }
+			PrintToken::Regexp(_) => {
+                r.push(pt);
+            }
             PrintToken::BlockOpen { val: _, coord: _ } => {
                 r.push(pt);
             }
@@ -121,6 +125,7 @@ fn tokens_width(tokens: &Vec<PrintToken>) -> usize {
                 .iter()
                 .map(|pt| match pt {
                     PrintToken::String(s) => s.len(),
+                    PrintToken::Regexp(exp) => exp.len() + 1,
                     PrintToken::BlockOpen {
                         ref val,
                         coord: _coord,
@@ -239,7 +244,7 @@ fn lisp_form_seq_print_tokens(pform: &PrintableLispForm, left: usize) -> Vec<Pri
                     PrintStyle::PairsBlock => {
                         let parts = childs
                             .chunks(2)
-                            .map(|part| {
+                            .map(|part| {                                
                                 let lf1 = &part[0];
                                 let lf2 = &part[1];
                                 let mut lf1c = lf1.clone();
@@ -420,6 +425,8 @@ fn lisp_form_print_tokens_aux(pform: &PrintableLispForm, left: usize) -> Vec<Pri
         ],
 
         PrintableLispForm::String(s) => vec![PrintToken::String(s.to_string())],
+        
+        PrintableLispForm::Regexp(exp) => vec![PrintToken::Regexp(exp.to_string())],
 
         PrintableLispForm::Atomic(s, coord) => vec![PrintToken::Atomic {
             val: s.to_string(),
@@ -498,6 +505,7 @@ fn symb_style_lisp_form_deep(pform: &mut PrintableLispForm) {
 			symb_style_lisp_form_deep(form)
 		}
         PrintableLispForm::String(_) => (),
+        PrintableLispForm::Regexp(_) => (),
         PrintableLispForm::Atomic(_, _) => (),
     }
 }
@@ -545,6 +553,7 @@ fn standard_style_next_unstyled(pform: &mut PrintableLispForm) -> bool {
 			coord: _
         } => standard_style_next_unstyled(&mut *form),
         PrintableLispForm::String(_) => false,
+        PrintableLispForm::Regexp(_) => false,
         PrintableLispForm::Atomic(_, _) => false,
     }
 }
@@ -573,6 +582,7 @@ pub fn print_tokens_to_str(tokens: &Vec<PrintToken>) -> String {
     for t in tokens {
         match t {
             PrintToken::String(s) => r.push_str(&format!("\"{}\"", s)),
+            PrintToken::Regexp(exp) => r.push_str(&format!("#\"{}\"", exp)),
             PrintToken::BlockOpen { val, coord: _ } => r.push_str(&val),
             PrintToken::BlockClose { val, coord: _ } => r.push_str(&val),
             PrintToken::Atomic { val, coord: _ } => r.push_str(&val),

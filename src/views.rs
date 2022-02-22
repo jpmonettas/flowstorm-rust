@@ -184,6 +184,9 @@ fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
                     PrintToken::String(s) => {
                         ui.label(RichText::new(format!("\"{}\"", s)));
                     }
+					PrintToken::Regexp(exp) => {
+                        ui.label(RichText::new(format!("#\"{}\"", exp)));
+                    }
                     PrintToken::BlockOpen { val, coord } => {
                         hot_token_label(ui, flow_thread, form, coord, val);
                     }
