@@ -1,4 +1,3 @@
-// TODO: string with scaped quotes inside
 use std::iter::Peekable;
 use std::str::Chars;
 
@@ -105,8 +104,13 @@ fn read_string(input: &mut Peekable<Chars>) -> String {
     while let Some(c) = input.next() {
         if c == '"' {
             break;
-        }
+        }		
         s.push(c.clone());
+ 
+		if c == '\\' { // when scaping skip the next char
+			let cc = input.next().unwrap();
+            s.push(cc.clone());
+		}
     }
 
     s
@@ -401,11 +405,23 @@ mod tests {
     fn regex_test() {
         let input = r#"(str/split something #".*")"#;
 
-        if let Some(form) = read_str(input) {
-			println!("{:?}",form);
+        if let Some(form) = read_str(input) {            
             assert_eq!(form.to_string(), String::from(input));
         } else {
             assert!(false);
         }
     }
+
+	#[test]
+    fn quoted_string_test() {
+        let input = r#"(str "something \"quoted\"" "bla")"#;
+
+        if let Some(form) = read_str(input) {            
+            assert_eq!(form.to_string(), String::from(input));
+        } else {
+            assert!(false);
+        }
+    }
+
+	
 }
