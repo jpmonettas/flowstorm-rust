@@ -218,6 +218,51 @@ impl<'a> Iterator for FlowExecutionCallStackIter<'a> {
     }
 }
 
+pub struct FlowExecutionCallChildsIter<'a> {
+    curr_idx: usize,
+    traces: &'a Vec<ExecTrace>,
+	stack: Vec<&'a FnCallTrace>,
+}
+
+impl<'a> Iterator for FlowExecutionCallChildsIter<'a> {
+    type Item = usize;
+
+	// assume the iterator is created and always left pointing before
+	// the next child
+    fn next(&mut self) -> Option<Self::Item> {        
+		if self.curr_idx <= self.traces.len() {                        
+			// find the next fn_call with empty stack            
+			while self.curr_idx < self.traces.len()-1 {
+				self.curr_idx += 1;
+                let t = &self.traces[self.curr_idx];
+				match t {
+					ExecTrace::FnCallTrace(fct) => {                        
+						if self.stack.len() == 0 {
+							self.stack.push(fct);
+                            return Some(self.curr_idx);
+						} else {
+							self.stack.push(fct);
+						}
+					}
+					ExecTrace::ExprTrace(expr_trace) => {
+						if expr_trace.is_outer_form {
+							if self.stack.len() == 0 {
+                                return None;
+							} else {
+                                self.stack.pop();
+							}                        						                        
+						}
+					}
+				};
+			}
+            None
+		} else {
+            None
+		}        
+    }
+}
+
+
 impl FlowExecution {
     pub fn new() -> Self {
         Self {
@@ -225,6 +270,14 @@ impl FlowExecution {
             curr_trace_idx: 0,
         }
     }
+
+	pub fn call_stack_childs_iter(&self, pos: usize) -> FlowExecutionCallChildsIter {		
+		FlowExecutionCallChildsIter {
+			curr_idx: pos,
+			traces: &self.traces,
+			stack: Vec::new()
+		}
+	}
 
     pub fn call_stack_iter(
         &self,
@@ -434,25 +487,26 @@ impl DebuggerState {
         // println!("Adding exec trace {} {:?}", flow_id, expr_trace);
 
         // Add the exec trace to the corresponding FlowThread initializing if necesary
-        let flow = self
-            .flows
-            .get_mut(&flow_id)
-            .expect("flow should be previously registered for flow_id");
-        if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-            // first exec_trace of the FlowThread, create a FlowThread, then add the trace
-            let mut thread = FlowThread::new(thread_id);
+		if let Some(flow) = self .flows .get_mut(&flow_id) {			
+			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+				// first exec_trace of the FlowThread, create a FlowThread, then add the trace
+				let mut thread = FlowThread::new(thread_id);
 
-            thread.add_expr_trace(expr_trace);
-            e.insert(thread);
+				thread.add_expr_trace(expr_trace);
+				e.insert(thread);
 
-            flow.selected_thread_id = Some(thread_id);
-        } else {
-            // FlowThread created, just add to it
-            flow.threads
-                .get_mut(&thread_id)
-                .unwrap()
-                .add_expr_trace(expr_trace);
-        }
+				flow.selected_thread_id = Some(thread_id);
+			} else {
+				// FlowThread created, just add to it
+				flow.threads
+					.get_mut(&thread_id)
+					.unwrap()
+					.add_expr_trace(expr_trace);
+			}
+		} else {
+			println!("Unregistered flow_id {} ... skipping trace", flow_id);
+		}
+        
     }
 
     pub fn add_fn_call_trace(
@@ -461,50 +515,53 @@ impl DebuggerState {
         thread_id: ThreadId,
         fn_call_trace: FnCallTrace,
     ) {
-        let flow = self
-            .flows
-            .get_mut(&flow_id)
-            .expect("flow should be previously registered for flow_id");
+		if let Some(flow) = self .flows .get_mut(&flow_id) {            
 
-        if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-            // first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
-            let mut thread = FlowThread::new(thread_id);
+			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+				// first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
+				let mut thread = FlowThread::new(thread_id);
 
-            thread.add_fn_call_trace(fn_call_trace);
-            e.insert(thread);
+				thread.add_fn_call_trace(fn_call_trace);
+				e.insert(thread);
 
-            flow.selected_thread_id = Some(thread_id);
-        } else {
-            // FlowThread created, just add to it
-            flow.threads
-                .get_mut(&thread_id)
-                .unwrap()
-                .add_fn_call_trace(fn_call_trace);
-        }
+				flow.selected_thread_id = Some(thread_id);
+			} else {
+				// FlowThread created, just add to it
+				flow.threads
+					.get_mut(&thread_id)
+					.unwrap()
+					.add_fn_call_trace(fn_call_trace);
+			}
+		} else {
+			println!("Unregistered flow_id {} ... skipping trace", flow_id);
+		}
+		
+        
     }
-
+	
     pub fn add_bind_trace(&mut self, flow_id: FlowId, thread_id: ThreadId, bind_trace: BindTrace) {
         // println!("Adding bind trace {} {:?}", flow_id, bind_trace);
-        let flow = self
-            .flows
-            .get_mut(&flow_id)
-            .expect("flow should be previously registered for flow_id");
+        if let Some(flow) = self .flows .get_mut(&flow_id) {
+			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+				// first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
+				let mut thread = FlowThread::new(thread_id);
 
-        if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-            // first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
-            let mut thread = FlowThread::new(thread_id);
+				thread.add_bind_trace(bind_trace);
+				e.insert(thread);
 
-            thread.add_bind_trace(bind_trace);
-            e.insert(thread);
+				flow.selected_thread_id = Some(thread_id);
+			} else {
+				// FlowThread created, just add to it
+				flow.threads
+					.get_mut(&thread_id)
+					.unwrap()
+					.add_bind_trace(bind_trace);
+			}
 
-            flow.selected_thread_id = Some(thread_id);
-        } else {
-            // FlowThread created, just add to it
-            flow.threads
-                .get_mut(&thread_id)
-                .unwrap()
-                .add_bind_trace(bind_trace);
-        }
+		} else {
+			println!("Unregistered flow_id {} ... skipping trace", flow_id);
+		}
+
     }
 
     pub fn flows_ids(&self) -> Vec<FlowId> {

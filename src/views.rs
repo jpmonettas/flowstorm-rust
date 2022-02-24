@@ -150,6 +150,31 @@ fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
     });
 }
 
+fn flow_callstack_tree(ui: &mut Ui, flow_thread: &FlowThread, pos: usize) {
+
+	if let ExecTrace::FnCallTrace(fct) = &flow_thread.execution.traces[pos] {
+
+		let fq_fn_name = format!("{}/{} ", &fct.fn_ns, &fct.fn_name);
+		let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
+        let fn_args_text = &fn_args[0..usize::min(80, fn_args.len())];
+		let fn_call_text = format!("({} {})",fq_fn_name, fn_args_text);
+        
+		let ch = egui::CollapsingHeader::new(fn_call_text).id_source(pos);
+            ch.show(ui, |ui| {
+                for child_pos in flow_thread.execution.call_stack_childs_iter(pos) {
+                    flow_callstack_tree(ui, flow_thread, child_pos);
+                }
+            });
+	
+	}	
+}
+
+fn flow_call_stack_block_2(ui: &mut Ui, flow_thread: &FlowThread) {
+	if let Some(first_fn_call_pos) = flow_thread.execution.traces.iter().position(|t| if let ExecTrace::FnCallTrace(_) = t {true} else {false}) {
+		flow_callstack_tree(ui, flow_thread, first_fn_call_pos);
+	}
+}
+
 fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
     let initial_size = egui::vec2(
         ui.available_width(),
@@ -255,7 +280,8 @@ fn flow_call_stack_panel(ui: &mut Ui, flow_thread: &mut FlowThread) {
     });
     egui::CentralPanel::default().show_inside(ui, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            flow_callstack_block(ui, flow_thread);
+            //flow_callstack_block(ui, flow_thread);
+			flow_call_stack_block_2(ui, flow_thread);
         });
     });
 }
