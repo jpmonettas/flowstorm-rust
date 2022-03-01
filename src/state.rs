@@ -2,7 +2,7 @@ use crate::lisp_pprinter::style_lisp_form;
 use crate::lisp_pprinter::PrintToken;
 use crate::lisp_reader;
 use crate::lisp_reader::{read_str, PrintableLispForm};
-use crate::util_types::SortedForms;
+use crate::util_types::{CallStackTree, SortedForms};
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -69,11 +69,11 @@ pub enum FlowTool {
 pub struct FlowThread {
     pub thread_id: ThreadId,
     pub execution: FlowExecution,
-    pub call_stack_depth: usize,
+    pub call_stack_tree: Option<CallStackTree>,
     pub bind_traces: Vec<BindTrace>,
     pub hot_coords: HashMap<FormId, HashSet<Coord>>,
     pub selected_flow_tool: FlowTool,
-	pub value_inspector: Option<PrintableLispForm>
+    pub value_inspector: Option<PrintableLispForm>,
 }
 
 #[allow(dead_code)]
@@ -179,118 +179,11 @@ fn is_coord_in_scope(scope_coord: &Coord, current_coord: &Coord) -> bool {
     }
 }
 
-pub struct FlowExecutionCallStackIter<'a> {
-    curr_idx: usize,
-    end_trace_idx: usize,
-    max_depth: usize,
-    traces: &'a Vec<ExecTrace>,
-    stack: Vec<&'a FnCallTrace>,
-}
-
-impl<'a> Iterator for FlowExecutionCallStackIter<'a> {
-    type Item = &'a ExecTrace;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.curr_idx <= self.end_trace_idx {
-            let t = &self.traces[self.curr_idx];
-            self.curr_idx += 1;
-            match t {
-                ExecTrace::FnCallTrace(fct) => {
-                    self.stack.push(fct);
-                    if self.stack.len() <= self.max_depth {
-                        return Some(t);
-                    }
-                }
-                ExecTrace::ExprTrace(expr_trace) => {
-                    if expr_trace.is_outer_form {
-                        if self.stack.len() <= self.max_depth {
-                            self.stack.pop();
-                            return Some(t);
-                        } else {
-                            self.stack.pop();
-                        }
-                    }
-                }
-            }
-        }
-
-        None
-    }
-}
-
-pub struct FlowExecutionCallChildsIter<'a> {
-    curr_idx: usize,
-    traces: &'a Vec<ExecTrace>,
-	stack: Vec<&'a FnCallTrace>,
-}
-
-impl<'a> Iterator for FlowExecutionCallChildsIter<'a> {
-    type Item = usize;
-
-	// assume the iterator is created and always left pointing before
-	// the next child
-    fn next(&mut self) -> Option<Self::Item> {        
-		if self.curr_idx <= self.traces.len() {                        
-			// find the next fn_call with empty stack            
-			while self.curr_idx < self.traces.len()-1 {
-				self.curr_idx += 1;
-                let t = &self.traces[self.curr_idx];
-				match t {
-					ExecTrace::FnCallTrace(fct) => {                        
-						if self.stack.len() == 0 {
-							self.stack.push(fct);
-                            return Some(self.curr_idx);
-						} else {
-							self.stack.push(fct);
-						}
-					}
-					ExecTrace::ExprTrace(expr_trace) => {
-						if expr_trace.is_outer_form {
-							if self.stack.len() == 0 {
-                                return None;
-							} else {
-                                self.stack.pop();
-							}                        						                        
-						}
-					}
-				};
-			}
-            None
-		} else {
-            None
-		}        
-    }
-}
-
-
 impl FlowExecution {
     pub fn new() -> Self {
         Self {
             traces: Vec::new(),
             curr_trace_idx: 0,
-        }
-    }
-
-	pub fn call_stack_childs_iter(&self, pos: usize) -> FlowExecutionCallChildsIter {		
-		FlowExecutionCallChildsIter {
-			curr_idx: pos,
-			traces: &self.traces,
-			stack: Vec::new()
-		}
-	}
-
-    pub fn call_stack_iter(
-        &self,
-        start_idx: usize,
-        end_idx: usize,
-        max_depth: usize,
-    ) -> FlowExecutionCallStackIter {
-        FlowExecutionCallStackIter {
-            curr_idx: start_idx,
-            end_trace_idx: end_idx,
-            max_depth,
-            traces: &self.traces,
-            stack: Vec::new(),
         }
     }
 
@@ -352,17 +245,24 @@ impl FlowThread {
         Self {
             thread_id,
             execution: FlowExecution::new(),
-            call_stack_depth: 1,
+            //call_stack_depth: 1,
+            call_stack_tree: None,
             bind_traces: Vec::new(),
             hot_coords: HashMap::new(),
             selected_flow_tool: FlowTool::Code,
-			value_inspector: None
+            value_inspector: None,
         }
     }
 
     pub fn add_expr_trace(&mut self, expr_trace: ExprTrace) {
         let form_id = expr_trace.form_id;
         let coord = expr_trace.coord.clone();
+
+        if expr_trace.is_outer_form {
+            if let Some(ref mut cst) = self.call_stack_tree {
+                cst.pop();
+            }
+        }
 
         self.execution.add_expr_trace(expr_trace);
 
@@ -380,6 +280,18 @@ impl FlowThread {
 
     pub fn add_fn_call_trace(&mut self, fn_call_trace: FnCallTrace) {
         self.execution.add_fn_call_trace(fn_call_trace);
+
+        let trace_idx = self.execution.traces.len() - 1;
+
+        match self.call_stack_tree {
+            // initialize the thread call_stack_tree on first fn_call_trace
+            None => {
+                self.call_stack_tree = Some(CallStackTree::new(trace_idx));
+            }
+            Some(ref mut cst) => {
+                cst.call(trace_idx);
+            }
+        }
     }
 
     pub fn add_bind_trace(&mut self, bind_trace: BindTrace) {
@@ -411,33 +323,32 @@ impl FlowThread {
         bindings_vec
     }
 
-	pub fn update_value_inspector(&mut self, value: &str) {
-		if let Some(result_pf) = lisp_reader::read_str(value) {
-			self.value_inspector = Some(result_pf);			
-		} 
-	}
+    pub fn update_value_inspector(&mut self, value: &str) {
+        if let Some(result_pf) = lisp_reader::read_str(value) {
+            self.value_inspector = Some(result_pf);
+        }
+    }
 
-	fn update_value_inspector_with_current_trace(&mut self) {
-		if let ExecTrace::ExprTrace(et) = self.execution.executing_trace().clone() {
-			self.update_value_inspector(&et.result);			
-		}
-	}
-	
-	pub fn step_next(&mut self) {
+    fn update_value_inspector_with_current_trace(&mut self) {
+        if let ExecTrace::ExprTrace(et) = self.execution.executing_trace().clone() {
+            self.update_value_inspector(&et.result);
+        }
+    }
+
+    pub fn step_next(&mut self) {
         self.execution.step_next();
-		self.update_value_inspector_with_current_trace();
+        self.update_value_inspector_with_current_trace();
     }
 
     pub fn step_back(&mut self) {
         self.execution.step_back();
-		self.update_value_inspector_with_current_trace();
+        self.update_value_inspector_with_current_trace();
     }
 
     pub fn jump_to(&mut self, trace_idx: &usize) {
         self.execution.jump_to(trace_idx);
-		self.update_value_inspector_with_current_trace();
+        self.update_value_inspector_with_current_trace();
     }
-
 }
 
 impl Flow {
@@ -457,10 +368,6 @@ impl DebuggerState {
     }
 
     pub fn add_flow_form(&mut self, flow_id: FlowId, form_id: FormId, form: Form, timestamp: u64) {
-        // println!(
-        //     "Adding a flow form {} {} {:?} {}",
-        //     flow_id, form_id, form, timestamp
-        // );
         if let hash_map::Entry::Vacant(e) = self.flows.entry(flow_id) {
             // Initialize the flow, then add form
             let mut flow = Flow {
@@ -484,29 +391,26 @@ impl DebuggerState {
     }
 
     pub fn add_exec_trace(&mut self, flow_id: FlowId, thread_id: ThreadId, expr_trace: ExprTrace) {
-        // println!("Adding exec trace {} {:?}", flow_id, expr_trace);
-
         // Add the exec trace to the corresponding FlowThread initializing if necesary
-		if let Some(flow) = self .flows .get_mut(&flow_id) {			
-			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-				// first exec_trace of the FlowThread, create a FlowThread, then add the trace
-				let mut thread = FlowThread::new(thread_id);
+        if let Some(flow) = self.flows.get_mut(&flow_id) {
+            if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+                // first exec_trace of the FlowThread, create a FlowThread, then add the trace
+                let mut thread = FlowThread::new(thread_id);
 
-				thread.add_expr_trace(expr_trace);
-				e.insert(thread);
+                thread.add_expr_trace(expr_trace);
+                e.insert(thread);
 
-				flow.selected_thread_id = Some(thread_id);
-			} else {
-				// FlowThread created, just add to it
-				flow.threads
-					.get_mut(&thread_id)
-					.unwrap()
-					.add_expr_trace(expr_trace);
-			}
-		} else {
-			println!("Unregistered flow_id {} ... skipping trace", flow_id);
-		}
-        
+                flow.selected_thread_id = Some(thread_id);
+            } else {
+                // FlowThread created, just add to it
+                flow.threads
+                    .get_mut(&thread_id)
+                    .unwrap()
+                    .add_expr_trace(expr_trace);
+            }
+        } else {
+            println!("Unregistered flow_id {} ... skipping trace", flow_id);
+        }
     }
 
     pub fn add_fn_call_trace(
@@ -515,53 +419,47 @@ impl DebuggerState {
         thread_id: ThreadId,
         fn_call_trace: FnCallTrace,
     ) {
-		if let Some(flow) = self .flows .get_mut(&flow_id) {            
+        if let Some(flow) = self.flows.get_mut(&flow_id) {
+            if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+                // first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
+                let mut thread = FlowThread::new(thread_id);
 
-			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-				// first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
-				let mut thread = FlowThread::new(thread_id);
+                thread.add_fn_call_trace(fn_call_trace);
+                e.insert(thread);
 
-				thread.add_fn_call_trace(fn_call_trace);
-				e.insert(thread);
-
-				flow.selected_thread_id = Some(thread_id);
-			} else {
-				// FlowThread created, just add to it
-				flow.threads
-					.get_mut(&thread_id)
-					.unwrap()
-					.add_fn_call_trace(fn_call_trace);
-			}
-		} else {
-			println!("Unregistered flow_id {} ... skipping trace", flow_id);
-		}
-		
-        
+                flow.selected_thread_id = Some(thread_id);
+            } else {
+                // FlowThread created, just add to it
+                flow.threads
+                    .get_mut(&thread_id)
+                    .unwrap()
+                    .add_fn_call_trace(fn_call_trace);
+            }
+        } else {
+            println!("Unregistered flow_id {} ... skipping trace", flow_id);
+        }
     }
-	
+
     pub fn add_bind_trace(&mut self, flow_id: FlowId, thread_id: ThreadId, bind_trace: BindTrace) {
-        // println!("Adding bind trace {} {:?}", flow_id, bind_trace);
-        if let Some(flow) = self .flows .get_mut(&flow_id) {
-			if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
-				// first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
-				let mut thread = FlowThread::new(thread_id);
+        if let Some(flow) = self.flows.get_mut(&flow_id) {
+            if let hash_map::Entry::Vacant(e) = flow.threads.entry(thread_id) {
+                // first fn_call_trace of the FlowThread, create a FlowThread, then add the trace
+                let mut thread = FlowThread::new(thread_id);
 
-				thread.add_bind_trace(bind_trace);
-				e.insert(thread);
+                thread.add_bind_trace(bind_trace);
+                e.insert(thread);
 
-				flow.selected_thread_id = Some(thread_id);
-			} else {
-				// FlowThread created, just add to it
-				flow.threads
-					.get_mut(&thread_id)
-					.unwrap()
-					.add_bind_trace(bind_trace);
-			}
-
-		} else {
-			println!("Unregistered flow_id {} ... skipping trace", flow_id);
-		}
-
+                flow.selected_thread_id = Some(thread_id);
+            } else {
+                // FlowThread created, just add to it
+                flow.threads
+                    .get_mut(&thread_id)
+                    .unwrap()
+                    .add_bind_trace(bind_trace);
+            }
+        } else {
+            println!("Unregistered flow_id {} ... skipping trace", flow_id);
+        }
     }
 
     pub fn flows_ids(&self) -> Vec<FlowId> {

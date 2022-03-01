@@ -4,7 +4,10 @@ use crate::lisp_reader;
 use crate::lisp_reader::PrintableLispForm;
 use crate::state::Form;
 use crate::state::{Coord, DebuggerState, DebuggerTool, ExecTrace, Flow, FlowThread, FlowTool};
+use crate::util_types::CallStackTreeNode;
 use egui::{Align, Color32, Label, Layout, RichText, Sense, TextStyle, Ui};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -72,107 +75,36 @@ fn hot_token_label(ui: &mut Ui, thread: &mut FlowThread, form: &Form, coord: &Co
     }
 }
 
-fn flow_callstack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
-    let initial_size = egui::vec2(
-        ui.available_width(),
-        ui.spacing().interact_size.y, // Assume there will be
-    );
+fn flow_callstack_tree(
+    ui: &mut Ui,
+    flow_thread: &FlowThread,
+    tree_pointer_mut: &Arc<Mutex<CallStackTreeNode>>,
+) {
+    let tree = tree_pointer_mut.lock().unwrap();
+    let idx = tree.trace_idx;
 
-    let layout = Layout::left_to_right()
-        .with_main_wrap(true)
-        .with_cross_align(Align::BOTTOM);
-
-    let indent_width = 20;
-    let mut indent_level = 0;
-
-    ui.allocate_ui_with_layout(initial_size, layout, |ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let row_height = (*ui.fonts())[TextStyle::Body].row_height();
-        ui.set_row_height(row_height);
-
-		let mut value_inspector = &mut flow_thread.value_inspector;
-        for t in flow_thread.execution.call_stack_iter(
-            0,
-            flow_thread.execution.traces.len() - 1,
-            flow_thread.call_stack_depth,
-        ) {
-            match t {
-                ExecTrace::FnCallTrace(fct) => {
-                    ui.allocate_exact_size(
-                        egui::vec2((indent_level * indent_width) as f32, row_height),
-                        Sense::hover(),
-                    );
-
-                    ui.label(RichText::new("(").color(Color32::WHITE).strong());
-
-                    let fq_fn_name = format!("{}/{} ", &fct.fn_ns, &fct.fn_name);
-                    ui.label(
-                        RichText::new(fq_fn_name)
-                            .color(Color32::from_rgb(253, 58, 197))
-                            .strong(),
-                    );
-
-                    let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
-                    let fn_args_text = RichText::new(&fn_args[0..usize::min(80, fn_args.len())]).color(Color32::WHITE);
-					if ui.add(Label::new(fn_args_text).sense(Sense::click())).clicked() {
-						
-						if let Some(result_pf) = lisp_reader::read_str(&fct.args_vec) {
-							*value_inspector = Some(result_pf);			
-						}                         
-					}
-                    
-
-                    indent_level += 1;
-                }
-                ExecTrace::ExprTrace(et) => {
-                    indent_level -= 1;
-                    ui.allocate_exact_size(
-                        egui::vec2((indent_level * indent_width) as f32, row_height),
-                        Sense::hover(),
-                    );					
-                    let ret_text = &et.result[0..usize::min(80, et.result.len())];
-                    let ret_label_text = RichText::new(format!(" => {}", ret_text));
-                    ui.label(RichText::new(")").color(Color32::WHITE).strong());
-					
-					// handle click here
-					if ui.add(Label::new(ret_label_text).sense(Sense::click())).clicked() {
-						
-						if let Some(result_pf) = lisp_reader::read_str(&et.result) {
-							*value_inspector = Some(result_pf);			
-						}                         
-					}                                        
-                }
-            }
-            ui.allocate_exact_size(egui::vec2(0.0, row_height), Sense::hover()); // new line
-            ui.end_row();
-            ui.set_row_height(row_height);
-        }
-    });
-}
-
-fn flow_callstack_tree(ui: &mut Ui, flow_thread: &FlowThread, pos: usize) {
-
-	if let ExecTrace::FnCallTrace(fct) = &flow_thread.execution.traces[pos] {
-
-		let fq_fn_name = format!("{}/{} ", &fct.fn_ns, &fct.fn_name);
-		let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
+    if let ExecTrace::FnCallTrace(fct) = &flow_thread.execution.traces[idx] {
+        let fq_fn_name = format!("{}/{} ", &fct.fn_ns, &fct.fn_name);
+        let fn_args = &fct.args_vec[1..&fct.args_vec.len() - 1];
         let fn_args_text = &fn_args[0..usize::min(80, fn_args.len())];
-		let fn_call_text = format!("({} {})",fq_fn_name, fn_args_text);
-        
-		let ch = egui::CollapsingHeader::new(fn_call_text).id_source(pos);
-            ch.show(ui, |ui| {
-                for child_pos in flow_thread.execution.call_stack_childs_iter(pos) {
-                    flow_callstack_tree(ui, flow_thread, child_pos);
-                }
-            });
-	
-	}	
+        let fn_call_text = format!("({} {})", fq_fn_name, fn_args_text);
+
+        let ch = egui::CollapsingHeader::new(fn_call_text).id_source(idx);
+        ch.show(ui, |ui| {
+            for child in &tree.childs {
+                flow_callstack_tree(ui, flow_thread, child);
+            }
+        });
+    } else {
+        panic!("call_stack_tree is pointing to a non FnCallTrace");
+    }
 }
 
-fn flow_call_stack_block_2(ui: &mut Ui, flow_thread: &FlowThread) {
-	if let Some(first_fn_call_pos) = flow_thread.execution.traces.iter().position(|t| if let ExecTrace::FnCallTrace(_) = t {true} else {false}) {
-		flow_callstack_tree(ui, flow_thread, first_fn_call_pos);
-	}
+fn flow_call_stack_block(ui: &mut Ui, flow_thread: &mut FlowThread) {
+    if let Some(cst) = &flow_thread.call_stack_tree {
+        let root_pointer = Arc::clone(&cst.root);
+        flow_callstack_tree(ui, flow_thread, &root_pointer);
+    }
 }
 
 fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread) {
@@ -209,7 +141,7 @@ fn flow_code_block(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
                     PrintToken::String(s) => {
                         ui.label(RichText::new(format!("\"{}\"", s)));
                     }
-					PrintToken::Regexp(exp) => {
+                    PrintToken::Regexp(exp) => {
                         ui.label(RichText::new(format!("#\"{}\"", exp)));
                     }
                     PrintToken::BlockOpen { val, coord } => {
@@ -267,21 +199,9 @@ fn flow_code_panel(ui: &mut Ui, forms: Vec<&Form>, flow_thread: &mut FlowThread)
 }
 
 fn flow_call_stack_panel(ui: &mut Ui, flow_thread: &mut FlowThread) {
-    egui::TopBottomPanel::top("flow_call_stack_panel").show_inside(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("-").clicked() && flow_thread.call_stack_depth > 1 {
-                flow_thread.call_stack_depth -= 1;
-            }
-            ui.label(format!("{}", flow_thread.call_stack_depth));
-            if ui.button("+").clicked() {
-                flow_thread.call_stack_depth += 1;
-            }
-        });
-    });
     egui::CentralPanel::default().show_inside(ui, |ui| {
         egui::ScrollArea::vertical().show(ui, |ui| {
-            //flow_callstack_block(ui, flow_thread);
-			flow_call_stack_block_2(ui, flow_thread);
+            flow_call_stack_block(ui, flow_thread);
         });
     });
 }
@@ -306,25 +226,28 @@ fn seq_collapsing_header(ui: &mut Ui, form: &PrintableLispForm) {
             // since the form is unstyled is going to print linear
             let linear_print =
                 lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
-            let ch = egui::CollapsingHeader::new(&linear_print[0..usize::min(80, linear_print.len())]).id_source(coord);
+            let ch =
+                egui::CollapsingHeader::new(&linear_print[0..usize::min(80, linear_print.len())])
+                    .id_source(coord);
             ch.show(ui, |ui| {
                 for c in childs {
                     result_form_tree(ui, c);
                 }
             });
-        },
-		PrintableLispForm::Tagged {
-            tag,
-            form,
-			coord,
-        } => {
+        }
+        PrintableLispForm::Tagged { tag, form, coord } => {
             // since the form is unstyled is going to print linear
-			let tagged_body = lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
-            let linear_print = format!("#{}{}", tag, &tagged_body[0..usize::min(80, tagged_body.len())]);
-                
+            let tagged_body =
+                lisp_pprinter::print_tokens_to_str(&lisp_pprinter::lisp_form_print_tokens(form));
+            let linear_print = format!(
+                "#{}{}",
+                tag,
+                &tagged_body[0..usize::min(80, tagged_body.len())]
+            );
+
             let ch = egui::CollapsingHeader::new(linear_print).id_source(coord);
             ch.show(ui, |ui| {
-				result_form_tree(ui, form);                
+                result_form_tree(ui, form);
             });
         }
         _ => {
@@ -367,9 +290,9 @@ fn result_form_tree(ui: &mut Ui, form: &PrintableLispForm) {
 }
 
 fn flow_result(ui: &mut Ui, flow_thread: &FlowThread) {
-	if let Some(form) = &flow_thread.value_inspector {
+    if let Some(form) = &flow_thread.value_inspector {
         result_form_tree(ui, form);
-	}     
+    }
 }
 
 fn flow_locals(ui: &mut Ui, flow_thread: &mut FlowThread) {
@@ -402,15 +325,15 @@ fn flow_thread(
                             flow_result(ui, selected_flow_thread);
                         });
 
-					if selected_flow_thread.selected_flow_tool == FlowTool::Code {
-						ui.group(|ui| {
-							egui::ScrollArea::vertical().show(ui, |ui| {
-								ui.set_width(ui.available_width());
-								ui.set_height(ui.available_height());
-								flow_locals(ui, selected_flow_thread);
-							});
-						});
-					}                    
+                    if selected_flow_thread.selected_flow_tool == FlowTool::Code {
+                        ui.group(|ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.set_height(ui.available_height());
+                                flow_locals(ui, selected_flow_thread);
+                            });
+                        });
+                    }
                 });
             });
 
@@ -564,13 +487,6 @@ impl epi::App for DebuggerApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::CtxRef, frame: &epi::Frame) {
-        // let Self {
-        //     state_arc,
-        //     ctx_chan_sender: _,
-        //     selected_tool,
-        // 	selected_flow_tool: _,
-        // } = self;
-
         // This is not optimal since we are keeping the lock for the entire frame
         let mut state = self.state_arc.lock().unwrap();
 
