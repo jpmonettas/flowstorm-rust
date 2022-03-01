@@ -36,12 +36,12 @@ pub enum PrintableLispForm {
         style: PrintStyle,
         coord: Vec<u16>,
     },
-	Regexp(String),
-	Tagged {
-		tag: String,
-		form: Box<PrintableLispForm>,
-		coord: Vec<u16>,
-	}
+    Regexp(String),
+    Tagged {
+        tag: String,
+        form: Box<PrintableLispForm>,
+        coord: Vec<u16>,
+    },
 }
 
 fn read_delimited_vec(
@@ -89,7 +89,15 @@ fn read_atomic_token(input: &mut Peekable<Chars>) -> String {
         s.push(c.clone());
 
         if let Some(cc) = input.peek() {
-            if cc == &' ' || cc == &',' || cc == &')' || cc == &'}' || cc == &']' || cc == &'(' || cc == &'{' || cc == &'[' {
+            if cc == &' '
+                || cc == &','
+                || cc == &')'
+                || cc == &'}'
+                || cc == &']'
+                || cc == &'('
+                || cc == &'{'
+                || cc == &'['
+            {
                 break;
             }
         }
@@ -104,13 +112,14 @@ fn read_string(input: &mut Peekable<Chars>) -> String {
     while let Some(c) = input.next() {
         if c == '"' {
             break;
-        }		
+        }
         s.push(c.clone());
- 
-		if c == '\\' { // when scaping skip the next char
-			let cc = input.next().unwrap();
+
+        if c == '\\' {
+            // when scaping skip the next char
+            let cc = input.next().unwrap();
             s.push(cc.clone());
-		}
+        }
     }
 
     s
@@ -155,29 +164,28 @@ fn read(input: &mut Peekable<Chars>, curr_coord: &Vec<u16>) -> Option<PrintableL
             }),
             '#' => {
                 input.next();
-				let next_ch = input.peek().unwrap();
+                let next_ch = input.peek().unwrap();
                 if *next_ch == '{' {
-					// it is a set
-					Some(PrintableLispForm::Set {
-						childs: read_delimited_vec(input, '}', curr_coord),
-						style: PrintStyle::Unstyled,
-						coord: curr_coord.clone(),
-					})
-				} else if *next_ch == '"' {
-					// its a regex
-					let exp = read_string(input);
-					Some(PrintableLispForm::Regexp(exp))
-				} else {
-					// assume it is a tagged val
-					let tag = read_atomic_token(input);                    
-					let form = read(input, curr_coord).unwrap();
+                    // it is a set
+                    Some(PrintableLispForm::Set {
+                        childs: read_delimited_vec(input, '}', curr_coord),
+                        style: PrintStyle::Unstyled,
+                        coord: curr_coord.clone(),
+                    })
+                } else if *next_ch == '"' {
+                    // its a regex
+                    let exp = read_string(input);
+                    Some(PrintableLispForm::Regexp(exp))
+                } else {
+                    // assume it is a tagged val
+                    let tag = read_atomic_token(input);
+                    let form = read(input, curr_coord).unwrap();
                     Some(PrintableLispForm::Tagged {
-						tag: tag,
-						form: Box::new(form),
-						coord: curr_coord.clone()
-					})
-				}
-                
+                        tag: tag,
+                        form: Box::new(form),
+                        coord: curr_coord.clone(),
+                    })
+                }
             }
             '{' => {
                 let (keys, vals) = read_map(input, curr_coord);
@@ -250,15 +258,14 @@ impl ToString for PrintableLispForm {
                     .collect::<Vec<String>>()
                     .join(" ");
                 format!("{{{}}}", content)
-            },
-			PrintableLispForm::Tagged {
+            }
+            PrintableLispForm::Tagged {
                 tag,
                 form,
-				coord: _
-            } => {                
+                coord: _,
+            } => {
                 format!("#{}{}", tag, form.to_string())
             }
-			
         }
     }
 }
@@ -390,7 +397,7 @@ mod tests {
         }
     }
 
-	#[test]
+    #[test]
     fn tagged_1_test() {
         let input = "#atom[{1 2} 0x25176608]";
 
@@ -401,27 +408,25 @@ mod tests {
         }
     }
 
-	#[test]
+    #[test]
     fn regex_test() {
         let input = r#"(str/split something #".*")"#;
 
-        if let Some(form) = read_str(input) {            
+        if let Some(form) = read_str(input) {
             assert_eq!(form.to_string(), String::from(input));
         } else {
             assert!(false);
         }
     }
 
-	#[test]
+    #[test]
     fn quoted_string_test() {
         let input = r#"(str "something \"quoted\"" "bla")"#;
 
-        if let Some(form) = read_str(input) {            
+        if let Some(form) = read_str(input) {
             assert_eq!(form.to_string(), String::from(input));
         } else {
             assert!(false);
         }
     }
-
-	
 }
